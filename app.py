@@ -164,9 +164,16 @@ def create_streamlit_dashboard():
             client_secret = st.secrets["api"]["client_secret"]
             st.success("🔒 Credenciales configuradas correctamente")
         except (KeyError, FileNotFoundError):
-            st.error("❌ Credenciales de API no configuradas en secrets.toml")
-            st.info("Por favor, configura las credenciales en el archivo secrets.toml")
-            return
+            st.warning("⚠️ Usando modo desarrollo - configura secrets.toml para producción")
+            
+            # Campos temporales para desarrollo
+            with st.expander("🔧 Configuración temporal (solo para desarrollo)"):
+                client_id = st.text_input("Client ID", type="password", help="Obtén esto de tu app OAuth en 42")
+                client_secret = st.text_input("Client Secret", type="password", help="Secret de tu app OAuth en 42")
+                
+                if not (client_id and client_secret):
+                    st.info("💡 **Para obtener credenciales:**\n1. Ve a profile.intra.42.fr/oauth/applications\n2. Crea una nueva aplicación\n3. Copia Client ID y Secret")
+                    return
     
     # Inicializar API
     try:
