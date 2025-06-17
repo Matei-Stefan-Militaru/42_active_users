@@ -10,186 +10,66 @@ import time
 st.set_page_config(
     page_title="42 Active Users Dashboard",
     page_icon="🚀",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    layout="wide"
 )
 
-# CSS personalizado para mejorar el diseño
+# CSS mejorado pero ligero
 st.markdown("""
 <style>
     .main-header {
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
-        font-size: 3rem;
+        font-size: 2.5rem;
         font-weight: bold;
         text-align: center;
-        margin-bottom: 2rem;
-    }
-    
-    .metric-card {
-        background: white;
-        padding: 1.5rem;
-        border-radius: 12px;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-        border-left: 4px solid #667eea;
         margin-bottom: 1rem;
     }
-    
-    .status-success {
-        background: #e8f5e8;
-        border: 1px solid #4caf50;
-        border-radius: 8px;
-        padding: 10px;
-        margin-bottom: 1rem;
-        color: #2e7d32;
-    }
-    
-    .status-info {
-        background: #e3f2fd;
-        border: 1px solid #2196f3;
-        border-radius: 8px;
-        padding: 10px;
-        margin-bottom: 1rem;
-        color: #1565c0;
-    }
-    
-    .chart-container {
-        background: white;
-        padding: 20px;
-        border-radius: 12px;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-        margin-bottom: 2rem;
-    }
+    .status-success { background: #e8f5e8; border-left: 4px solid #4caf50; padding: 10px; border-radius: 4px; }
+    .status-info { background: #e3f2fd; border-left: 4px solid #2196f3; padding: 10px; border-radius: 4px; }
 </style>
 """, unsafe_allow_html=True)
 
-# Función para obtener todos los campus
-@st.cache_data(ttl=3600)  # Cache por 1 hora
-def get_all_campus(headers):
-    """Obtener lista de todos los campus"""
-    url = "https://api.intra.42.fr/v2/campus"
-    all_campus = []
-    
-    while url:
-        try:
-            response = requests.get(url, headers=headers)
-            if response.status_code != 200:
-                st.error(f"Error al obtener campus: {response.status_code}")
-                break
-            
-            data = response.json()
-            all_campus.extend(data)
-            
-            # Paginación
-            url = response.links.get("next", {}).get("url")
-            
-        except Exception as e:
-            st.error(f"Error de conexión: {e}")
-            break
-    
-    return all_campus
+st.markdown('<h1 class="main-header">🚀 42 Network Active Users</h1>', unsafe_allow_html=True)
 
-# Función para obtener usuarios activos de un campus con rate limiting mejorado
-def get_active_users_by_campus(campus_id, headers, max_pages=10, max_retries=3):
-    """Obtener usuarios activos de un campus específico con manejo de rate limiting"""
-    url = f"https://api.intra.42.fr/v2/campus/{campus_id}/locations"
-    params = {"per_page": 100}
-    
-    users = []
-    page_count = 0
-    
-    while url and page_count < max_pages:
-        retry_count = 0
-        success = False
-        
-        while retry_count < max_retries and not success:
-            try:
-                # Rate limiting más conservador
-                time.sleep(0.5)  # Esperar 500ms entre peticiones
-                
-                response = requests.get(url, headers=headers, params=params if page_count == 0 else None)
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    users.extend(data)
-                    success = True
-                    
-                    # Paginación
-                    url = response.links.get("next", {}).get("url")
-                    page_count += 1
-                    
-                elif response.status_code == 429:
-                    # Rate limit excedido
-                    retry_after = int(response.headers.get('Retry-After', 60))
-                    st.warning(f"⏳ Rate limit alcanzado para campus {campus_id}. Esperando {retry_after} segundos...")
-                    
-                    # Mostrar countdown
-                    countdown_placeholder = st.empty()
-                    for i in range(retry_after, 0, -1):
-                        countdown_placeholder.text(f"⏱️ Reintentando en {i} segundos...")
-                        time.sleep(1)
-                    countdown_placeholder.empty()
-                    
-                    retry_count += 1
-                    
-                elif response.status_code == 401:
-                    st.error(f"❌ Error de autenticación (401). Verifica tus credenciales.")
-                    return users
-                    
-                elif response.status_code == 403:
-                    st.error(f"❌ Acceso denegado (403) para campus {campus_id}.")
-                    return users
-                    
-                else:
-                    st.warning(f"⚠️ Error {response.status_code} para campus {campus_id}. Reintentando...")
-                    time.sleep(2)  # Esperar más tiempo en caso de otros errores
-                    retry_count += 1
-                    
-            except requests.exceptions.RequestException as e:
-                st.error(f"🔌 Error de conexión para campus {campus_id}: {e}")
-                time.sleep(2)
-                retry_count += 1
-            except Exception as e:
-                st.error(f"❌ Error inesperado para campus {campus_id}: {e}")
-                retry_count += 1
-        
-        if not success:
-            st.error(f"❌ No se pudieron obtener datos del campus {campus_id} después de {max_retries} intentos")
-            break
-    
-    return users
-
-# Header principal
-st.markdown('<h1 class="main-header">🚀 42 Network Active Users Dashboard</h1>', unsafe_allow_html=True)
-st.markdown("### Monitoreo en tiempo real de estudiantes activos en los campus de 42")
-
-# Sidebar para configuración
+# Configuración rápida en sidebar
 with st.sidebar:
-    st.markdown("## ⚙️ Configuración API")
+    st.markdown("## ⚙️ Configuración")
     
-    # Mostrar cómo configurar secrets
     with st.expander("🔐 Configurar Credenciales"):
-        st.markdown("Agrega esto a tus secrets en Streamlit:")
         st.code("""
 [api]
 client_id = "TU_CLIENT_ID"
 client_secret = "TU_CLIENT_SECRET"
         """, language="toml")
     
-    # Obtener credenciales
-    credentials = st.secrets.get("api", {})
-    client_id = credentials.get("client_id")
-    client_secret = credentials.get("client_secret")
+    # Campus ID selector
+    campus_id = st.number_input(
+        "🏫 Campus ID", 
+        value=46, 
+        min_value=1, 
+        help="ID del campus a consultar (46 = Barcelona)"
+    )
     
-    if not client_id or not client_secret:
-        st.error("❌ Faltan credenciales en los secrets")
-        st.stop()
-    else:
-        st.markdown('<div class="status-success">✅ Credenciales configuradas correctamente</div>', unsafe_allow_html=True)
+    # Botón de actualización
+    refresh = st.button("🔄 Actualizar", type="primary", use_container_width=True)
+    
+    # Configuración opcional
+    with st.expander("⚙️ Configuración Avanzada"):
+        per_page = st.slider("Resultados por página", 50, 100, 100)
+        show_raw_data = st.checkbox("Mostrar datos raw", value=False)
 
-# Autenticación
-with st.spinner("🔐 Autenticando con la API de 42..."):
+# Obtener credenciales
+credentials = st.secrets.get("api", {})
+client_id = credentials.get("client_id")
+client_secret = credentials.get("client_secret")
+
+if not client_id or not client_secret:
+    st.error("❌ Faltan credenciales en los secrets")
+    st.stop()
+
+# Función rápida de autenticación (sin cache innecesario)
+def get_auth_token():
     auth_url = "https://api.intra.42.fr/oauth/token"
     data = {
         "grant_type": "client_credentials",
@@ -197,399 +77,181 @@ with st.spinner("🔐 Autenticando con la API de 42..."):
         "client_secret": client_secret,
     }
     
-    try:
-        auth_response = requests.post(auth_url, data=data)
-        
-        if auth_response.status_code != 200:
-            st.error("❌ Error al obtener el token de acceso")
-            st.write(auth_response.json())
-            st.stop()
-        
-        access_token = auth_response.json().get("access_token")
-        headers = {"Authorization": f"Bearer {access_token}"}
-    except Exception as e:
-        st.error(f"❌ Error de conexión durante la autenticación: {e}")
-        st.stop()
+    response = requests.post(auth_url, data=data)
+    if response.status_code != 200:
+        st.error("❌ Error de autenticación")
+        return None
+    
+    return response.json().get("access_token")
 
-# Mostrar estado de la API
-with st.sidebar:
-    st.markdown('<div class="status-info">🔒 Autenticación exitosa</div>', unsafe_allow_html=True)
-    st.markdown('<div class="status-info">⚡ Límites: 2 req/seg, 1200 req/hora</div>', unsafe_allow_html=True)
+# Función optimizada para obtener usuarios (SIN delays artificiales)
+def get_active_users_fast(campus_id, headers, per_page=100):
+    """Obtener usuarios activos de forma rápida"""
+    url = f"https://api.intra.42.fr/v2/campus/{campus_id}/locations"
+    params = {"per_page": per_page}
+    
+    all_users = []
+    
+    while url:
+        try:
+            response = requests.get(url, headers=headers, params=params)
+            
+            if response.status_code == 200:
+                data = response.json()
+                all_users.extend(data)
+                
+                # Paginación
+                url = response.links.get("next", {}).get("url")
+                params = None  # Solo usar params en la primera petición
+                
+            elif response.status_code == 429:
+                # Rate limit - esperar solo el tiempo mínimo necesario
+                retry_after = int(response.headers.get('Retry-After', 1))
+                st.warning(f"⏳ Esperando {retry_after}s...")
+                time.sleep(retry_after)
+                
+            else:
+                st.warning(f"⚠️ Error {response.status_code}")
+                break
+                
+        except Exception as e:
+            st.error(f"❌ Error: {e}")
+            break
+    
+    return all_users
 
-# Obtener lista de campus
-with st.spinner("📍 Cargando campus disponibles..."):
-    all_campus = get_all_campus(headers)
-
-if not all_campus:
-    st.error("No se pudieron cargar los campus")
-    st.stop()
-
-# Crear diccionario de países y campus
-countries = {}
-campus_dict = {}
-
-for campus in all_campus:
-    country = campus.get('country', 'Unknown')
-    campus_name = campus.get('name', f"Campus {campus.get('id')}")
-    campus_id = campus.get('id')
-    
-    if country not in countries:
-        countries[country] = []
-    
-    countries[country].append({
-        'name': campus_name,
-        'id': campus_id,
-        'city': campus.get('city', 'Unknown')
-    })
-    
-    campus_dict[f"{campus_name} ({country})"] = {
-        'id': campus_id,
-        'country': country,
-        'city': campus.get('city', 'Unknown')
-    }
-
-# Filtros en la sidebar
-with st.sidebar:
-    st.markdown("## 🔍 Filtros")
-    
-    # Filtro por país
-    selected_countries = st.multiselect(
-        "🌍 Países",
-        options=list(countries.keys()),
-        default=list(countries.keys())[:3] if len(countries) > 3 else list(countries.keys()),
-        help="Selecciona los países que quieres monitorear"
-    )
-    
-    # Filtro por campus basado en países seleccionados
-    available_campus = []
-    for country in selected_countries:
-        for campus in countries[country]:
-            available_campus.append(f"{campus['name']} ({country})")
-    
-    selected_campus = st.multiselect(
-        "🏫 Campus",
-        options=available_campus,
-        default=available_campus[:5] if len(available_campus) > 5 else available_campus,
-        help="Selecciona los campus específicos"
-    )
-    
-    # Botón para actualizar datos
-    refresh_data = st.button("🔄 Actualizar Datos", type="primary", use_container_width=True)
-    
-    # Configuración avanzada
-    with st.expander("⚙️ Configuración Avanzada"):
-        rate_limit_delay = st.slider(
-            "Delay entre peticiones (segundos)", 
-            min_value=0.1, 
-            max_value=2.0, 
-            value=0.5, 
-            step=0.1,
-            help="Aumenta este valor si tienes problemas de rate limiting"
-        )
-        
-        max_retries = st.slider(
-            "Máximo número de reintentos", 
-            min_value=1, 
-            max_value=5, 
-            value=3,
-            help="Número de veces que se reintentará una petición fallida"
-        )
-        
-        show_detailed_errors = st.checkbox(
-            "Mostrar errores detallados", 
-            value=False,
-            help="Muestra información técnica adicional sobre errores"
-        )
-
-# Procesar datos si se seleccionaron campus
-if selected_campus and (refresh_data or 'users_data' not in st.session_state):
-    all_users_data = []
-    
-    # Mostrar información sobre límites
-    st.info(f"🔄 Cargando datos de {len(selected_campus)} campus. Esto puede tomar unos minutos debido a los límites de la API...")
-    
-    # Barra de progreso
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    
-    for i, campus_key in enumerate(selected_campus):
-        campus_info = campus_dict[campus_key]
-        campus_id = campus_info['id']
-        
-        status_text.text(f"📍 Cargando {campus_key} ({i+1}/{len(selected_campus)})...")
-        
-        # Obtener usuarios activos con configuración personalizada
-        users = get_active_users_by_campus(campus_id, headers, max_retries=max_retries)
-        
-        if users:  # Solo procesar si obtuvimos datos
-            # Procesar datos
-            for user_location in users:
-                if isinstance(user_location.get('user'), dict):
-                    user_data = {
-                        'login': user_location['user'].get('login'),
-                        'displayname': user_location['user'].get('displayname', user_location['user'].get('login')),
-                        'begin_at': user_location.get('begin_at'),
-                        'end_at': user_location.get('end_at'),
-                        'campus': campus_key.split(' (')[0],  # Nombre del campus sin país
-                        'country': campus_info['country'],
-                        'city': campus_info['city'],
-                        'host': user_location.get('host'),
-                        'campus_id': campus_id
-                    }
-                    all_users_data.append(user_data)
+# Autenticar solo cuando sea necesario
+if refresh or 'access_token' not in st.session_state:
+    with st.spinner("🔐 Conectando..."):
+        token = get_auth_token()
+        if token:
+            st.session_state.access_token = token
+            st.sidebar.markdown('<div class="status-success">✅ Conectado</div>', unsafe_allow_html=True)
         else:
-            st.warning(f"⚠️ No se obtuvieron datos del campus {campus_key}")
+            st.stop()
+
+headers = {"Authorization": f"Bearer {st.session_state.access_token}"}
+
+# Obtener datos solo cuando se solicite
+if refresh or 'users_data' not in st.session_state:
+    with st.spinner(f"📍 Cargando campus {campus_id}..."):
+        users = get_active_users_fast(campus_id, headers, per_page)
         
-        # Actualizar progreso
-        progress_bar.progress((i + 1) / len(selected_campus))
-        
-        # Delay adicional entre campus para evitar rate limiting
-        if i < len(selected_campus) - 1:  # No esperar después del último
-            time.sleep(rate_limit_delay)
-    
-    # Guardar en session state
-    st.session_state.users_data = all_users_data
-    st.session_state.last_update = datetime.now()
-    
-    if all_users_data:
-        status_text.text("✅ ¡Datos cargados correctamente!")
-        st.success(f"✅ Se cargaron datos de {len(all_users_data)} usuarios activos")
-    else:
-        status_text.text("⚠️ No se encontraron usuarios activos en los campus seleccionados")
-        st.warning("⚠️ No se encontraron usuarios activos. Esto puede ser normal si es fuera del horario de clases.")
-    
-    time.sleep(2)
-    status_text.empty()
-    progress_bar.empty()
+        if users:
+            st.session_state.users_data = users
+            st.session_state.last_update = datetime.now()
+            st.success(f"✅ {len(users)} registros cargados")
+        else:
+            st.warning("⚠️ No se encontraron usuarios activos")
+            st.session_state.users_data = []
 
 # Mostrar datos si están disponibles
 if 'users_data' in st.session_state and st.session_state.users_data:
-    df = pd.DataFrame(st.session_state.users_data)
+    users = st.session_state.users_data
     
-    # Estadísticas generales
-    st.markdown("## 📊 Estadísticas Generales")
+    # Procesar datos de forma eficiente
+    processed_data = []
+    for user_location in users:
+        if isinstance(user_location.get('user'), dict):
+            processed_data.append({
+                'login': user_location['user'].get('login'),
+                'displayname': user_location['user'].get('displayname'),
+                'begin_at': user_location.get('begin_at'),
+                'end_at': user_location.get('end_at'),
+                'host': user_location.get('host')
+            })
     
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric(
-            "👥 Usuarios Activos", 
-            len(df),
-            help="Total de estudiantes conectados actualmente"
-        )
-    
-    with col2:
-        active_campus = df['campus'].nunique()
-        st.metric(
-            "🏫 Campus Activos", 
-            active_campus,
-            help="Número de campus con estudiantes conectados"
-        )
-    
-    with col3:
-        countries_active = df['country'].nunique()
-        st.metric(
-            "🌍 Países", 
-            countries_active,
-            help="Países con actividad actual"
-        )
-    
-    with col4:
-        # Calcular usuarios únicos
-        unique_users = df['login'].nunique()
-        st.metric(
-            "👤 Usuarios Únicos", 
-            unique_users,
-            help="Estudiantes únicos (sin duplicados)"
-        )
-    
-    # Convertir timestamps de manera segura
-    try:
-        df['begin_at'] = pd.to_datetime(df['begin_at'], errors='coerce')
-        df['hora'] = df['begin_at'].dt.hour
-        df['fecha'] = df['begin_at'].dt.date
+    if processed_data:
+        df = pd.DataFrame(processed_data)
         
-        # Filtrar filas con timestamps válidos para el gráfico de horas
-        df_valid_time = df.dropna(subset=['hora'])
+        # Métricas rápidas
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("👥 Usuarios Activos", len(df))
+        with col2:
+            unique_users = df['login'].nunique()
+            st.metric("👤 Usuarios Únicos", unique_users)
+        with col3:
+            active_hosts = df['host'].nunique()
+            st.metric("💻 Equipos Activos", active_hosts)
+        with col4:
+            if 'last_update' in st.session_state:
+                last_update = st.session_state.last_update.strftime("%H:%M:%S")
+                st.metric("🕒 Actualizado", last_update)
         
-        if len(df_valid_time) > 0:
-            # Gráfico principal - Actividad por hora
-            st.markdown("## 📈 Actividad por Hora del Día")
-            
-            hour_counts = df_valid_time['hora'].value_counts().sort_index()
-            
-            # Crear gráfico con Plotly (FIXED)
-            fig_hours = go.Figure()
-            
-            fig_hours.add_trace(go.Bar(
-                x=hour_counts.index,
-                y=hour_counts.values,
-                marker_color='rgba(102, 126, 234, 0.8)',
-                marker_line_color='rgba(102, 126, 234, 1)',
-                marker_line_width=2,
-                name='Usuarios Activos'
-            ))
-            
-            fig_hours.update_layout(
-                title={
-                    'text': 'Distribución de Usuarios Activos por Hora',
-                    'x': 0.5,
-                    'xanchor': 'center',
-                    'font': {'size': 20}
-                },
-                xaxis_title="Hora del Día",
-                yaxis_title="Número de Usuarios",
-                template="plotly_white",
-                height=400,
-                showlegend=False,
-                xaxis=dict(
-                    tickmode='linear',
-                    tick0=0,
-                    dtick=1,
-                    range=[-0.5, 23.5]
-                )
-            )
-            
-            st.plotly_chart(fig_hours, use_container_width=True)
-        else:
-            st.warning("⚠️ No hay datos de tiempo válidos para mostrar el gráfico de actividad por hora")
-    
-    except Exception as e:
-        st.error(f"❌ Error al procesar timestamps: {e}")
-        if show_detailed_errors:
-            st.exception(e)
-    
-    # Gráficos adicionales
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("### 🌍 Usuarios por País")
+        # Procesar timestamps de forma segura
         try:
-            country_counts = df['country'].value_counts()
+            df['begin_at'] = pd.to_datetime(df['begin_at'], errors='coerce')
+            df['hora'] = df['begin_at'].dt.hour
             
-            if len(country_counts) > 0:
-                fig_countries = px.pie(
-                    values=country_counts.values,
-                    names=country_counts.index,
-                    title="Distribución por Países"
+            # Gráfico de actividad por hora (optimizado)
+            df_valid = df.dropna(subset=['hora'])
+            if len(df_valid) > 0:
+                st.markdown("## 📈 Actividad por Hora")
+                
+                hour_counts = df_valid['hora'].value_counts().sort_index()
+                
+                # Gráfico optimizado
+                fig = go.Figure(data=[
+                    go.Bar(
+                        x=hour_counts.index,
+                        y=hour_counts.values,
+                        marker_color='rgba(102, 126, 234, 0.8)',
+                        name='Usuarios Activos'
+                    )
+                ])
+                
+                fig.update_layout(
+                    title="Distribución por Hora del Día",
+                    xaxis_title="Hora",
+                    yaxis_title="Usuarios",
+                    height=400,
+                    showlegend=False,
+                    xaxis=dict(tickmode='linear', tick0=0, dtick=1)
                 )
-                fig_countries.update_traces(textposition='inside', textinfo='percent+label')
-                st.plotly_chart(fig_countries, use_container_width=True)
-            else:
-                st.info("No hay datos de países para mostrar")
+                
+                st.plotly_chart(fig, use_container_width=True)
+        
         except Exception as e:
-            st.error(f"Error al crear gráfico de países: {e}")
-    
-    with col2:
-        st.markdown("### 🏫 Usuarios por Campus")
+            st.warning(f"⚠️ Error al procesar timestamps: {e}")
+        
+        # Tabla de usuarios
+        st.markdown("## 👥 Usuarios Activos")
+        
+        # Preparar datos para mostrar
+        display_df = df[['login', 'displayname', 'host', 'begin_at']].copy()
+        
+        # Formatear timestamps
         try:
-            campus_counts = df['campus'].value_counts()
-            
-            if len(campus_counts) > 0:
-                fig_campus = px.bar(
-                    x=campus_counts.values,
-                    y=campus_counts.index,
-                    orientation='h',
-                    title="Actividad por Campus"
-                )
-                fig_campus.update_layout(yaxis={'categoryorder': 'total ascending'})
-                st.plotly_chart(fig_campus, use_container_width=True)
-            else:
-                st.info("No hay datos de campus para mostrar")
-        except Exception as e:
-            st.error(f"Error al crear gráfico de campus: {e}")
+            display_df['begin_at'] = pd.to_datetime(display_df['begin_at'], errors='coerce')
+            display_df['begin_at'] = display_df['begin_at'].dt.strftime('%H:%M:%S')
+            display_df['begin_at'] = display_df['begin_at'].fillna('N/A')
+        except:
+            display_df['begin_at'] = 'N/A'
+        
+        # Renombrar columnas
+        display_df.columns = ['Login', 'Nombre', 'Equipo', 'Hora Inicio']
+        
+        st.dataframe(display_df, use_container_width=True, height=400)
+        
+        # Datos raw opcionales
+        if show_raw_data:
+            st.markdown("## 🔍 Datos Raw")
+            st.json(users[:3])  # Solo mostrar los primeros 3 para no sobrecargar
     
-    # Tabla de usuarios activos
-    st.markdown("## 👥 Usuarios Activos Actualmente")
-    
-    # Filtros para la tabla
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        country_filter = st.selectbox(
-            "Filtrar por País",
-            options=['Todos'] + list(df['country'].unique()),
-            key='country_filter'
-        )
-    
-    with col2:
-        campus_filter = st.selectbox(
-            "Filtrar por Campus",
-            options=['Todos'] + list(df['campus'].unique()),
-            key='campus_filter'
-        )
-    
-    with col3:
-        show_duplicates = st.checkbox(
-            "Mostrar usuarios duplicados",
-            help="Algunos usuarios pueden aparecer en múltiples ubicaciones"
-        )
-    
-    # Aplicar filtros
-    filtered_df = df.copy()
-    
-    if country_filter != 'Todos':
-        filtered_df = filtered_df[filtered_df['country'] == country_filter]
-    
-    if campus_filter != 'Todos':
-        filtered_df = filtered_df[filtered_df['campus'] == campus_filter]
-    
-    if not show_duplicates:
-        filtered_df = filtered_df.drop_duplicates(subset=['login'])
-    
-    # Preparar datos para mostrar
-    display_df = filtered_df[['login', 'displayname', 'campus', 'country', 'host', 'begin_at']].copy()
-    
-    # Formatear timestamps de manera segura
-    try:
-        display_df['begin_at'] = pd.to_datetime(display_df['begin_at'], errors='coerce')
-        display_df['begin_at'] = display_df['begin_at'].dt.strftime('%H:%M:%S')
-        display_df['begin_at'] = display_df['begin_at'].fillna('N/A')
-    except Exception as e:
-        display_df['begin_at'] = 'N/A'
-        if show_detailed_errors:
-            st.warning(f"Error al formatear timestamps: {e}")
-    
-    display_df = display_df.rename(columns={
-        'login': 'Login',
-        'displayname': 'Nombre',
-        'campus': 'Campus',
-        'country': 'País',
-        'host': 'Puesto',
-        'begin_at': 'Hora Inicio'
-    })
-    
-    st.dataframe(
-        display_df,
-        use_container_width=True,
-        height=400
-    )
-    
-    # Información adicional
-    st.markdown("---")
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.info(f"📊 **Mostrando:** {len(filtered_df)} usuarios")
-    
-    with col2:
-        if 'last_update' in st.session_state:
-            last_update = st.session_state.last_update.strftime("%H:%M:%S")
-            st.info(f"🕒 **Última actualización:** {last_update}")
-        else:
-            st.info("🕒 **Última actualización:** No disponible")
+    else:
+        st.info("📝 No hay datos de usuarios para mostrar")
 
-elif selected_campus:
-    st.info("👆 Haz clic en '🔄 Actualizar Datos' para cargar la información")
+elif 'users_data' in st.session_state:
+    st.info("⚠️ No hay usuarios activos en este momento")
 else:
-    st.warning("⚠️ Selecciona al menos un campus para ver los datos")
+    st.info("👆 Haz clic en 'Actualizar' para cargar los datos")
 
-# Footer
+# Footer simple
 st.markdown("---")
 st.markdown(
-    "💡 **Tips:**\n"
-    "- Los datos se actualizan manualmente con el botón 'Actualizar Datos'\n"
-    "- Si tienes errores 429, aumenta el delay en Configuración Avanzada\n"
-    "- Es normal no ver usuarios activos fuera del horario de clases\n"
-    "- Usa los filtros para enfocarte en campus específicos"
+    "💡 **Tips:** "
+    "Campus Barcelona = 46 | "
+    "Campus Madrid = 47 | "
+    "Actualiza manualmente para datos frescos"
 )
