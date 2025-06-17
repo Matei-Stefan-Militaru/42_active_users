@@ -197,15 +197,19 @@ with st.spinner("🔐 Autenticando con la API de 42..."):
         "client_secret": client_secret,
     }
     
-    auth_response = requests.post(auth_url, data=data)
-    
-    if auth_response.status_code != 200:
-        st.error("❌ Error al obtener el token de acceso")
-        st.write(auth_response.json())
+    try:
+        auth_response = requests.post(auth_url, data=data)
+        
+        if auth_response.status_code != 200:
+            st.error("❌ Error al obtener el token de acceso")
+            st.write(auth_response.json())
+            st.stop()
+        
+        access_token = auth_response.json().get("access_token")
+        headers = {"Authorization": f"Bearer {access_token}"}
+    except Exception as e:
+        st.error(f"❌ Error de conexión durante la autenticación: {e}")
         st.stop()
-    
-    access_token = auth_response.json().get("access_token")
-    headers = {"Authorization": f"Bearer {access_token}"}
 
 # Mostrar estado de la API
 with st.sidebar:
@@ -308,10 +312,6 @@ if selected_campus and (refresh_data or 'users_data' not in st.session_state):
     progress_bar = st.progress(0)
     status_text = st.empty()
     
-    # Configurar delay personalizado si está disponible
-    delay = rate_limit_delay if 'rate_limit_delay' in locals() else 0.5
-    retries = max_retries if 'max_retries' in locals() else 3
-    
     for i, campus_key in enumerate(selected_campus):
         campus_info = campus_dict[campus_key]
         campus_id = campus_info['id']
@@ -319,7 +319,7 @@ if selected_campus and (refresh_data or 'users_data' not in st.session_state):
         status_text.text(f"📍 Cargando {campus_key} ({i+1}/{len(selected_campus)})...")
         
         # Obtener usuarios activos con configuración personalizada
-        users = get_active_users_by_campus(campus_id, headers, max_retries=retries)
+        users = get_active_users_by_campus(campus_id, headers, max_retries=max_retries)
         
         if users:  # Solo procesar si obtuvimos datos
             # Procesar datos
@@ -345,7 +345,7 @@ if selected_campus and (refresh_data or 'users_data' not in st.session_state):
         
         # Delay adicional entre campus para evitar rate limiting
         if i < len(selected_campus) - 1:  # No esperar después del último
-            time.sleep(delay)
+            time.sleep(rate_limit_delay)
     
     # Guardar en session state
     st.session_state.users_data = all_users_data
@@ -403,73 +403,101 @@ if 'users_data' in st.session_state and st.session_state.users_data:
             help="Estudiantes únicos (sin duplicados)"
         )
     
-    # Convertir timestamps
-    df['begin_at'] = pd.to_datetime(df['begin_at'])
-    df['hora'] = df['begin_at'].dt.hour
-    df['fecha'] = df['begin_at'].dt.date
+    # Convertir timestamps de manera segura
+    try:
+        df['begin_at'] = pd.to_datetime(df['begin_at'], errors='coerce')
+        df['hora'] = df['begin_at'].dt.hour
+        df['fecha'] = df['begin_at'].dt.date
+        
+        # Filtrar filas con timestamps válidos para el gráfico de horas
+        df_valid_time = df.dropna(subset=['hora'])
+        
+        if len(df_valid_time) > 0:
+            # Gráfico principal - Actividad por hora
+            st.markdown("## 📈 Actividad por Hora del Día")
+            
+            hour_counts = df_valid_time['hora'].value_counts().sort_index()
+            
+            # Crear gráfico con Plotly (FIXED)
+            fig_hours = go.Figure()
+            
+            fig_hours.add_trace(go.Bar(
+                x=hour_counts.index,
+                y=hour_counts.values,
+                marker_color='rgba(102, 126, 234, 0.8)',
+                marker_line_color='rgba(102, 126, 234, 1)',
+                marker_line_width=2,
+                name='Usuarios Activos'
+            ))
+            
+            fig_hours.update_layout(
+                title={
+                    'text': 'Distribución de Usuarios Activos por Hora',
+                    'x': 0.5,
+                    'xanchor': 'center',
+                    'font': {'size': 20}
+                },
+                xaxis_title="Hora del Día",
+                yaxis_title="Número de Usuarios",
+                template="plotly_white",
+                height=400,
+                showlegend=False,
+                xaxis=dict(
+                    tickmode='linear',
+                    tick0=0,
+                    dtick=1,
+                    range=[-0.5, 23.5]
+                )
+            )
+            
+            st.plotly_chart(fig_hours, use_container_width=True)
+        else:
+            st.warning("⚠️ No hay datos de tiempo válidos para mostrar el gráfico de actividad por hora")
     
-    # Gráfico principal - Actividad por hora
-    st.markdown("## 📈 Actividad por Hora del Día")
-    
-    hour_counts = df['hora'].value_counts().sort_index()
-    
-    # Crear gráfico con Plotly
-    fig_hours = go.Figure()
-    
-    fig_hours.add_trace(go.Bar(
-        x=hour_counts.index,
-        y=hour_counts.values,
-        marker_color='rgba(102, 126, 234, 0.8)',
-        marker_line_color='rgba(102, 126, 234, 1)',
-        marker_line_width=2,
-        name='Usuarios Activos'
-    ))
-    
-    fig_hours.update_layout(
-        title={
-            'text': 'Distribución de Usuarios Activos por Hora',
-            'x': 0.5,
-            'xanchor': 'center',
-            'font': {'size': 20}
-        },
-        xaxis_title="Hora del Día",
-        yaxis_title="Número de Usuarios",
-        template="plotly_white",
-        height=400,
-        showlegend=False
-    )
-    
-    fig_hours.update_xaxis(tickmode='linear', tick0=0, dtick=1)
-    
-    st.plotly_chart(fig_hours, use_container_width=True)
+    except Exception as e:
+        st.error(f"❌ Error al procesar timestamps: {e}")
+        if show_detailed_errors:
+            st.exception(e)
     
     # Gráficos adicionales
     col1, col2 = st.columns(2)
     
     with col1:
         st.markdown("### 🌍 Usuarios por País")
-        country_counts = df['country'].value_counts()
-        
-        fig_countries = px.pie(
-            values=country_counts.values,
-            names=country_counts.index,
-            title="Distribución por Países"
-        )
-        fig_countries.update_traces(textposition='inside', textinfo='percent+label')
-        st.plotly_chart(fig_countries, use_container_width=True)
+        try:
+            country_counts = df['country'].value_counts()
+            
+            if len(country_counts) > 0:
+                fig_countries = px.pie(
+                    values=country_counts.values,
+                    names=country_counts.index,
+                    title="Distribución por Países"
+                )
+                fig_countries.update_traces(textposition='inside', textinfo='percent+label')
+                st.plotly_chart(fig_countries, use_container_width=True)
+            else:
+                st.info("No hay datos de países para mostrar")
+        except Exception as e:
+            st.error(f"Error al crear gráfico de países: {e}")
     
     with col2:
         st.markdown("### 🏫 Usuarios por Campus")
-        campus_counts = df['campus'].value_counts()
-        
-        fig_campus = px.bar(
-            x=campus_counts.values,
-            y=campus_counts.index,
-            orientation='h',
-            title="Actividad por Campus"
-        )
-        fig_campus.update_layout(yaxis={'categoryorder': 'total ascending'})
-        st.plotly_chart(fig_campus, use_container_width=True)
+        try:
+            campus_counts = df['campus'].value_counts()
+            
+            if len(campus_counts) > 0:
+                fig_campus = px.bar(
+                    x=campus_counts.values,
+                    y=campus_counts.index,
+                    orientation='h',
+                    title="Actividad por Campus"
+                )
+                fig_campus.update_layout(yaxis={'categoryorder': 'total ascending'})
+                st.plotly_chart(fig_campus, use_container_width=True)
+            else:
+                st.info("No hay datos de campus para mostrar")
+        except Exception as e:
+            st.error(f"Error al crear gráfico de campus: {e}")
     
     # Tabla de usuarios activos
     st.markdown("## 👥 Usuarios Activos Actualmente")
@@ -511,7 +539,17 @@ if 'users_data' in st.session_state and st.session_state.users_data:
     
     # Preparar datos para mostrar
     display_df = filtered_df[['login', 'displayname', 'campus', 'country', 'host', 'begin_at']].copy()
-    display_df['begin_at'] = display_df['begin_at'].dt.strftime('%H:%M:%S')
+    
+    # Formatear timestamps de manera segura
+    try:
+        display_df['begin_at'] = pd.to_datetime(display_df['begin_at'], errors='coerce')
+        display_df['begin_at'] = display_df['begin_at'].dt.strftime('%H:%M:%S')
+        display_df['begin_at'] = display_df['begin_at'].fillna('N/A')
+    except Exception as e:
+        display_df['begin_at'] = 'N/A'
+        if show_detailed_errors:
+            st.warning(f"Error al formatear timestamps: {e}")
+    
     display_df = display_df.rename(columns={
         'login': 'Login',
         'displayname': 'Nombre',
