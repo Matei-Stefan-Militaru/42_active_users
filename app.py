@@ -289,7 +289,7 @@ def create_streamlit_dashboard():
         selected_ranges = st.multiselect(
             "Rangos",
             options=list(processor.level_ranges.values()),
-            default=list(processor.level_ranges.values())
+            default=list(processor.level_ranges.values())  # Seleccionar todos por defecto
         )
     
     # Botón para cargar datos
@@ -307,12 +307,15 @@ def create_streamlit_dashboard():
             
             # Obtener estudiantes del campus
             students = api.get_users_by_campus(campus['id'])
+            st.write(f"📊 {campus['name']}: {len(students)} usuarios obtenidos")
             
             # Filtrar estudiantes activos
             active_students = processor.filter_active_students(students)
+            st.write(f"✅ {campus['name']}: {len(active_students)} estudiantes activos")
             
             # Procesar datos
             processed_students = processor.process_user_data(active_students, campus)
+            st.write(f"🎯 {campus['name']}: {len(processed_students)} estudiantes procesados")
             all_student_data.extend(processed_students)
             
             # Actualizar progreso
@@ -323,12 +326,29 @@ def create_streamlit_dashboard():
         # Crear DataFrame
         df = pd.DataFrame(all_student_data)
         
+        # Debug: mostrar información sobre los datos
+        if len(all_student_data) > 0:
+            st.write(f"📈 Total de estudiantes cargados: {len(all_student_data)}")
+            if len(df) > 0:
+                ranges_found = df['range'].value_counts()
+                st.write("🏷️ Rangos encontrados:", ranges_found.to_dict())
+        
         if df.empty:
-            st.warning("No se encontraron datos con los filtros seleccionados")
+            st.warning("⚠️ No se encontraron estudiantes en los campus seleccionados")
+            st.info("💡 Esto puede ocurrir si:")
+            st.info("• Los campus no tienen estudiantes activos en los últimos 3 meses")
+            st.info("• Los estudiantes no tienen cursus '42cursus' configurado")
+            st.info("• Hay problemas con la API de 42")
             return
         
         # Filtrar por rangos seleccionados
         df_filtered = df[df['range'].isin(selected_ranges)]
+        
+        if df_filtered.empty:
+            st.warning("⚠️ No se encontraron datos con los rangos seleccionados")
+            st.info(f"💡 Rangos disponibles en los datos: {', '.join(df['range'].unique())}")
+            st.info(f"🎯 Rangos seleccionados: {', '.join(selected_ranges)}")
+            return
         
         # Mostrar estadísticas generales
         st.header("📊 Estadísticas Generales")
