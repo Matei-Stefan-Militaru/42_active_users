@@ -295,8 +295,9 @@ def create_streamlit_dashboard():
             st.info("Crea un archivo .streamlit/secrets.toml con:")
             st.code("""
 [api]
-client_id = st.secrets["api"]["client_id"]
-client_secret = st.secrets["api"]["client_secret"]
+credentials = st.secrets.get("api", {})
+client_id = credentials.get("client_id")
+client_secret = credentials.get("client_secret")
 """)
             return
         
