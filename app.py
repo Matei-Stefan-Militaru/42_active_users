@@ -5,6 +5,8 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime
 import time
+from concurrent.futures import ThreadPoolExecutor
+import asyncio
 
 # Configuración de página
 st.set_page_config(
@@ -13,7 +15,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# CSS mejorado pero ligero
+# CSS optimizado
 st.markdown("""
 <style>
     .main-header {
@@ -25,51 +27,63 @@ st.markdown("""
         text-align: center;
         margin-bottom: 1rem;
     }
-    .status-success { background: #e8f5e8; border-left: 4px solid #4caf50; padding: 10px; border-radius: 4px; }
-    .status-info { background: #e3f2fd; border-left: 4px solid #2196f3; padding: 10px; border-radius: 4px; }
+    .metric-card {
+        background: white;
+        padding: 1rem;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        border-left: 4px solid #667eea;
+    }
+    .status-success { 
+        background: #e8f5e8; 
+        border-left: 4px solid #4caf50; 
+        padding: 10px; 
+        border-radius: 4px; 
+    }
+    .status-error { 
+        background: #ffebee; 
+        border-left: 4px solid #f44336; 
+        padding: 10px; 
+        border-radius: 4px; 
+    }
 </style>
 """, unsafe_allow_html=True)
 
 st.markdown('<h1 class="main-header">🚀 42 Network Active Users</h1>', unsafe_allow_html=True)
 
-# Configuración rápida en sidebar
+# Configuración en sidebar
 with st.sidebar:
     st.markdown("## ⚙️ Configuración")
     
-    with st.expander("🔐 Configurar Credenciales"):
-        st.code("""
-[api]
-client_id = "TU_CLIENT_ID"
-client_secret = "TU_CLIENT_SECRET"
-        """, language="toml")
+    # Campus selector mejorado
+    campus_options = {
+        "Barcelona": 46,
+        "Madrid": 47,
+        "Paris": 1,
+        "Málaga": 101
+    }
     
-    # Campus ID selector
-    campus_id = st.number_input(
-        "🏫 Campus ID", 
-        value=46, 
-        min_value=1, 
-        help="ID del campus a consultar (46 = Barcelona)"
+    selected_campus_name = st.selectbox(
+        "🏫 Seleccionar Campus",
+        options=list(campus_options.keys()),
+        index=0
     )
+    campus_id = campus_options[selected_campus_name]
     
-    # Botón de actualización
-    refresh = st.button("🔄 Actualizar", type="primary", use_container_width=True)
+    # Auto-refresh
+    auto_refresh = st.checkbox("🔄 Auto-actualizar (30s)", value=False)
+    refresh_button = st.button("🔄 Actualizar Ahora", type="primary", use_container_width=True)
     
-    # Configuración opcional
-    with st.expander("⚙️ Configuración Avanzada"):
+    # Configuración avanzada
+    with st.expander("⚙️ Opciones Avanzadas"):
         per_page = st.slider("Resultados por página", 50, 100, 100)
-        show_raw_data = st.checkbox("Mostrar datos raw", value=False)
+        show_raw_data = st.checkbox("Mostrar datos raw")
+        max_pages = st.slider("Páginas máximas", 1, 10, 5)
 
-# Obtener credenciales
-credentials = st.secrets.get("api", {})
-client_id = credentials.get("client_id")
-client_secret = credentials.get("client_secret")
-
-if not client_id or not client_secret:
-    st.error("❌ Faltan credenciales en los secrets")
-    st.stop()
-
-# Función rápida de autenticación (sin cache innecesario)
-def get_auth_token():
+# Función de autenticación mejorada
+@st.cache_data(ttl=3500)  # Cache por 58 minutos (tokens duran 1 hora)
+def get_auth_token(client_id, client_secret):
+    """Obtener token de autenticación con cache"""
     auth_url = "https://api.intra.42.fr/oauth/token"
     data = {
         "grant_type": "client_credentials",
@@ -77,181 +91,344 @@ def get_auth_token():
         "client_secret": client_secret,
     }
     
-    response = requests.post(auth_url, data=data)
-    if response.status_code != 200:
-        st.error("❌ Error de autenticación")
+    try:
+        response = requests.post(auth_url, data=data, timeout=10)
+        if response.status_code == 200:
+            return response.json().get("access_token")
+        else:
+            st.error(f"❌ Error de autenticación: {response.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"❌ Error de conexión: {str(e)}")
         return None
-    
-    return response.json().get("access_token")
 
-# Función optimizada para obtener usuarios (SIN delays artificiales)
-def get_active_users_fast(campus_id, headers, per_page=100):
-    """Obtener usuarios activos de forma rápida"""
+# Función optimizada para obtener usuarios
+def get_active_users_optimized(campus_id, token, per_page=100, max_pages=5):
+    """Obtener usuarios activos de forma optimizada"""
+    headers = {"Authorization": f"Bearer {token}"}
     url = f"https://api.intra.42.fr/v2/campus/{campus_id}/locations"
     params = {"per_page": per_page}
     
     all_users = []
+    page_count = 0
     
-    while url:
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    while url and page_count < max_pages:
         try:
-            response = requests.get(url, headers=headers, params=params)
+            status_text.text(f"Cargando página {page_count + 1}...")
+            response = requests.get(url, headers=headers, params=params, timeout=15)
             
             if response.status_code == 200:
                 data = response.json()
                 all_users.extend(data)
+                page_count += 1
                 
-                # Paginación
+                # Actualizar progreso
+                progress = min(page_count / max_pages, 1.0)
+                progress_bar.progress(progress)
+                
+                # Obtener siguiente URL
                 url = response.links.get("next", {}).get("url")
-                params = None  # Solo usar params en la primera petición
+                params = None  # Solo usar params en primera petición
                 
             elif response.status_code == 429:
-                # Rate limit - esperar solo el tiempo mínimo necesario
-                retry_after = int(response.headers.get('Retry-After', 1))
-                st.warning(f"⏳ Esperando {retry_after}s...")
+                retry_after = int(response.headers.get('Retry-After', 2))
+                status_text.text(f"⏳ Rate limit - esperando {retry_after}s...")
                 time.sleep(retry_after)
                 
             else:
-                st.warning(f"⚠️ Error {response.status_code}")
+                st.warning(f"⚠️ Error HTTP {response.status_code}")
                 break
                 
-        except Exception as e:
-            st.error(f"❌ Error: {e}")
+        except requests.exceptions.Timeout:
+            st.warning("⚠️ Timeout - intentando continuar...")
             break
+        except Exception as e:
+            st.error(f"❌ Error: {str(e)}")
+            break
+    
+    progress_bar.empty()
+    status_text.empty()
     
     return all_users
 
-# Autenticar solo cuando sea necesario
-if refresh or 'access_token' not in st.session_state:
-    with st.spinner("🔐 Conectando..."):
-        token = get_auth_token()
-        if token:
-            st.session_state.access_token = token
-            st.sidebar.markdown('<div class="status-success">✅ Conectado</div>', unsafe_allow_html=True)
-        else:
-            st.stop()
-
-headers = {"Authorization": f"Bearer {st.session_state.access_token}"}
-
-# Obtener datos solo cuando se solicite
-if refresh or 'users_data' not in st.session_state:
-    with st.spinner(f"📍 Cargando campus {campus_id}..."):
-        users = get_active_users_fast(campus_id, headers, per_page)
-        
-        if users:
-            st.session_state.users_data = users
-            st.session_state.last_update = datetime.now()
-            st.success(f"✅ {len(users)} registros cargados")
-        else:
-            st.warning("⚠️ No se encontraron usuarios activos")
-            st.session_state.users_data = []
-
-# Mostrar datos si están disponibles
-if 'users_data' in st.session_state and st.session_state.users_data:
-    users = st.session_state.users_data
-    
-    # Procesar datos de forma eficiente
+# Función para procesar datos de usuarios
+@st.cache_data
+def process_user_data(users_raw):
+    """Procesar datos de usuarios de forma eficiente"""
     processed_data = []
-    for user_location in users:
-        if isinstance(user_location.get('user'), dict):
+    
+    for user_location in users_raw:
+        user_info = user_location.get('user', {})
+        if isinstance(user_info, dict) and user_info.get('login'):
             processed_data.append({
-                'login': user_location['user'].get('login'),
-                'displayname': user_location['user'].get('displayname'),
+                'login': user_info.get('login'),
+                'displayname': user_info.get('displayname', 'N/A'),
                 'begin_at': user_location.get('begin_at'),
                 'end_at': user_location.get('end_at'),
-                'host': user_location.get('host')
+                'host': user_location.get('host'),
+                'campus_id': user_location.get('campus_id')
             })
     
-    if processed_data:
-        df = pd.DataFrame(processed_data)
-        
-        # Métricas rápidas
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("👥 Usuarios Activos", len(df))
-        with col2:
-            unique_users = df['login'].nunique()
-            st.metric("👤 Usuarios Únicos", unique_users)
-        with col3:
-            active_hosts = df['host'].nunique()
-            st.metric("💻 Equipos Activos", active_hosts)
-        with col4:
-            if 'last_update' in st.session_state:
-                last_update = st.session_state.last_update.strftime("%H:%M:%S")
-                st.metric("🕒 Actualizado", last_update)
-        
-        # Procesar timestamps de forma segura
-        try:
-            df['begin_at'] = pd.to_datetime(df['begin_at'], errors='coerce')
-            df['hora'] = df['begin_at'].dt.hour
-            
-            # Gráfico de actividad por hora (optimizado)
-            df_valid = df.dropna(subset=['hora'])
-            if len(df_valid) > 0:
-                st.markdown("## 📈 Actividad por Hora")
-                
-                hour_counts = df_valid['hora'].value_counts().sort_index()
-                
-                # Gráfico optimizado
-                fig = go.Figure(data=[
-                    go.Bar(
-                        x=hour_counts.index,
-                        y=hour_counts.values,
-                        marker_color='rgba(102, 126, 234, 0.8)',
-                        name='Usuarios Activos'
-                    )
-                ])
-                
-                fig.update_layout(
-                    title="Distribución por Hora del Día",
-                    xaxis_title="Hora",
-                    yaxis_title="Usuarios",
-                    height=400,
-                    showlegend=False,
-                    xaxis=dict(tickmode='linear', tick0=0, dtick=1)
-                )
-                
-                st.plotly_chart(fig, use_container_width=True)
-        
-        except Exception as e:
-            st.warning(f"⚠️ Error al procesar timestamps: {e}")
-        
-        # Tabla de usuarios
-        st.markdown("## 👥 Usuarios Activos")
-        
-        # Preparar datos para mostrar
-        display_df = df[['login', 'displayname', 'host', 'begin_at']].copy()
-        
-        # Formatear timestamps
-        try:
-            display_df['begin_at'] = pd.to_datetime(display_df['begin_at'], errors='coerce')
-            display_df['begin_at'] = display_df['begin_at'].dt.strftime('%H:%M:%S')
-            display_df['begin_at'] = display_df['begin_at'].fillna('N/A')
-        except:
-            display_df['begin_at'] = 'N/A'
-        
-        # Renombrar columnas
-        display_df.columns = ['Login', 'Nombre', 'Equipo', 'Hora Inicio']
-        
-        st.dataframe(display_df, use_container_width=True, height=400)
-        
-        # Datos raw opcionales
-        if show_raw_data:
-            st.markdown("## 🔍 Datos Raw")
-            st.json(users[:3])  # Solo mostrar los primeros 3 para no sobrecargar
+    return pd.DataFrame(processed_data) if processed_data else pd.DataFrame()
+
+# Obtener credenciales
+try:
+    credentials = st.secrets.get("api", {})
+    client_id = credentials.get("client_id")
+    client_secret = credentials.get("client_secret")
     
-    else:
-        st.info("📝 No hay datos de usuarios para mostrar")
+    if not client_id or not client_secret:
+        st.error("❌ Configura las credenciales en los secrets de Streamlit")
+        st.info("Ve a Settings > Secrets y agrega:")
+        st.code("""
+[api]
+client_id = "tu_client_id"
+client_secret = "tu_client_secret"
+        """)
+        st.stop()
+        
+except Exception:
+    st.error("❌ No se pueden leer las credenciales")
+    st.stop()
 
-elif 'users_data' in st.session_state:
-    st.info("⚠️ No hay usuarios activos en este momento")
+# Auto-refresh logic
+if auto_refresh:
+    if 'last_refresh' not in st.session_state:
+        st.session_state.last_refresh = time.time()
+    
+    if time.time() - st.session_state.last_refresh > 30:
+        st.session_state.last_refresh = time.time()
+        st.rerun()
+
+# Trigger para actualizar datos
+should_refresh = (
+    refresh_button or 
+    'users_data' not in st.session_state or 
+    'current_campus' not in st.session_state or 
+    st.session_state.get('current_campus') != campus_id
+)
+
+if should_refresh:
+    # Autenticar
+    with st.spinner("🔐 Autenticando..."):
+        token = get_auth_token(client_id, client_secret)
+        
+        if not token:
+            st.stop()
+    
+    # Mostrar estado en sidebar
+    st.sidebar.markdown('<div class="status-success">✅ Autenticado</div>', unsafe_allow_html=True)
+    
+    # Obtener datos
+    with st.spinner(f"📍 Cargando datos de {selected_campus_name}..."):
+        users_raw = get_active_users_optimized(campus_id, token, per_page, max_pages)
+        
+        if users_raw:
+            df = process_user_data(users_raw)
+            
+            # Guardar en session state
+            st.session_state.users_data = df
+            st.session_state.users_raw = users_raw
+            st.session_state.current_campus = campus_id
+            st.session_state.last_update = datetime.now()
+            
+            st.success(f"✅ {len(users_raw)} registros cargados, {len(df)} usuarios procesados")
+        else:
+            st.warning(f"⚠️ No se encontraron usuarios activos en {selected_campus_name}")
+            st.session_state.users_data = pd.DataFrame()
+
+# Mostrar dashboard si hay datos
+if 'users_data' in st.session_state and not st.session_state.users_data.empty:
+    df = st.session_state.users_data
+    
+    # Métricas principales
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("👥 Total Sesiones", len(df))
+    
+    with col2:
+        unique_users = df['login'].nunique()
+        st.metric("👤 Usuarios Únicos", unique_users)
+    
+    with col3:
+        active_hosts = df['host'].nunique()
+        st.metric("💻 Equipos Únicos", active_hosts)
+    
+    with col4:
+        if 'last_update' in st.session_state:
+            last_update = st.session_state.last_update.strftime("%H:%M:%S")
+            st.metric("🕒 Última Actualización", last_update)
+    
+    # Procesar timestamps para gráficos
+    df_viz = df.copy()
+    
+    try:
+        # Convertir timestamps
+        df_viz['begin_at'] = pd.to_datetime(df_viz['begin_at'], errors='coerce')
+        df_viz = df_viz.dropna(subset=['begin_at'])
+        
+        if len(df_viz) > 0:
+            df_viz['hour'] = df_viz['begin_at'].dt.hour
+            df_viz['date'] = df_viz['begin_at'].dt.date
+            
+            # Gráfico de actividad por hora
+            st.markdown("## 📈 Actividad por Hora del Día")
+            
+            hour_counts = df_viz['hour'].value_counts().reindex(range(24), fill_value=0)
+            
+            fig = go.Figure()
+            fig.add_trace(go.Bar(
+                x=hour_counts.index,
+                y=hour_counts.values,
+                marker_color='rgba(102, 126, 234, 0.8)',
+                name='Sesiones Activas',
+                hovertemplate='<b>Hora:</b> %{x}:00<br><b>Sesiones:</b> %{y}<extra></extra>'
+            ))
+            
+            fig.update_layout(
+                title=f"Distribución Horaria - Campus {selected_campus_name}",
+                xaxis_title="Hora del Día",
+                yaxis_title="Número de Sesiones",
+                height=400,
+                showlegend=False,
+                xaxis=dict(
+                    tickmode='linear',
+                    tick0=0,
+                    dtick=2,
+                    range=[-0.5, 23.5]
+                ),
+                yaxis=dict(gridcolor='lightgray'),
+                plot_bgcolor='white'
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Top equipos más utilizados
+            if len(df) > 0:
+                st.markdown("## 💻 Equipos Más Utilizados")
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    host_counts = df['host'].value_counts().head(10)
+                    
+                    fig_hosts = go.Figure()
+                    fig_hosts.add_trace(go.Bar(
+                        y=host_counts.index[::-1],  # Invertir para mostrar el mayor arriba
+                        x=host_counts.values[::-1],
+                        orientation='h',
+                        marker_color='rgba(118, 75, 162, 0.8)',
+                        hovertemplate='<b>Equipo:</b> %{y}<br><b>Sesiones:</b> %{x}<extra></extra>'
+                    ))
+                    
+                    fig_hosts.update_layout(
+                        title="Top 10 Equipos",
+                        height=400,
+                        xaxis_title="Número de Sesiones",
+                        yaxis_title="Equipo",
+                        showlegend=False
+                    )
+                    
+                    st.plotly_chart(fig_hosts, use_container_width=True)
+                
+                with col2:
+                    # Usuarios más activos
+                    user_counts = df['login'].value_counts().head(10)
+                    
+                    fig_users = go.Figure()
+                    fig_users.add_trace(go.Bar(
+                        y=user_counts.index[::-1],
+                        x=user_counts.values[::-1],
+                        orientation='h',
+                        marker_color='rgba(102, 126, 234, 0.8)',
+                        hovertemplate='<b>Usuario:</b> %{y}<br><b>Sesiones:</b> %{x}<extra></extra>'
+                    ))
+                    
+                    fig_users.update_layout(
+                        title="Top 10 Usuarios Activos",
+                        height=400,
+                        xaxis_title="Número de Sesiones",
+                        yaxis_title="Usuario",
+                        showlegend=False
+                    )
+                    
+                    st.plotly_chart(fig_users, use_container_width=True)
+            
+    except Exception as e:
+        st.warning(f"⚠️ Error al procesar datos para visualización: {str(e)}")
+    
+    # Tabla de usuarios activos
+    st.markdown("## 👥 Sesiones Activas")
+    
+    # Preparar datos para mostrar
+    display_df = df[['login', 'displayname', 'host', 'begin_at']].copy()
+    
+    # Formatear timestamps
+    try:
+        display_df['begin_at'] = pd.to_datetime(display_df['begin_at'], errors='coerce')
+        display_df['formatted_time'] = display_df['begin_at'].dt.strftime('%H:%M:%S').fillna('N/A')
+    except:
+        display_df['formatted_time'] = 'N/A'
+    
+    # Reorganizar columnas
+    display_df = display_df[['login', 'displayname', 'host', 'formatted_time']]
+    display_df.columns = ['Login', 'Nombre', 'Equipo', 'Hora Inicio']
+    
+    # Filtros rápidos
+    col1, col2 = st.columns(2)
+    with col1:
+        search_user = st.text_input("🔍 Buscar usuario", placeholder="Escribe un login...")
+    with col2:
+        search_host = st.text_input("🔍 Buscar equipo", placeholder="Escribe un nombre de equipo...")
+    
+    # Aplicar filtros
+    filtered_df = display_df.copy()
+    if search_user:
+        filtered_df = filtered_df[filtered_df['Login'].str.contains(search_user, case=False, na=False)]
+    if search_host:
+        filtered_df = filtered_df[filtered_df['Equipo'].str.contains(search_host, case=False, na=False)]
+    
+    st.dataframe(
+        filtered_df,
+        use_container_width=True,
+        height=400,
+        hide_index=True
+    )
+    
+    # Datos raw si está habilitado
+    if show_raw_data and 'users_raw' in st.session_state:
+        st.markdown("## 🔍 Datos Raw (Primeros 3 registros)")
+        st.json(st.session_state.users_raw[:3])
+
 else:
-    st.info("👆 Haz clic en 'Actualizar' para cargar los datos")
+    # Estado inicial
+    st.info(f"👆 Selecciona un campus y haz clic en **'Actualizar Ahora'** para cargar los datos")
+    
+    # Mostrar información de ayuda
+    with st.expander("ℹ️ Información"):
+        st.markdown("""
+        **Campuses disponibles:**
+        - Barcelona: ID 46
+        - Madrid: ID 47
+        - Paris: ID 1
+        - Málaga: ID 101
+        
+        **Características:**
+        - ✅ Cache inteligente para mejor rendimiento
+        - ✅ Manejo de rate limits automático
+        - ✅ Visualizaciones interactivas
+        - ✅ Filtros de búsqueda
+        - ✅ Auto-actualización opcional
+        """)
 
-# Footer simple
+# Footer
 st.markdown("---")
 st.markdown(
-    "💡 **Tips:** "
-    "Campus Barcelona = 46 | "
-    "Campus Madrid = 47 | "
-    "Actualiza manualmente para datos frescos"
+    f"💡 **Dashboard 42 Network** | "
+    f"Campus: {selected_campus_name} ({campus_id}) | "
+    f"🔄 Auto-actualizar: {'✅' if auto_refresh else '❌'}"
 )
