@@ -90,9 +90,9 @@ def get_all_campus(headers):
     
     return all_campus
 
-# Función para obtener usuarios activos de un campus
-def get_active_users_by_campus(campus_id, headers, max_pages=10):
-    """Obtener usuarios activos de un campus específico"""
+# Función para obtener usuarios activos de un campus con rate limiting mejorado
+def get_active_users_by_campus(campus_id, headers, max_pages=10, max_retries=3):
+    """Obtener usuarios activos de un campus específico con manejo de rate limiting"""
     url = f"https://api.intra.42.fr/v2/campus/{campus_id}/locations"
     params = {"per_page": 100}
     
@@ -100,24 +100,62 @@ def get_active_users_by_campus(campus_id, headers, max_pages=10):
     page_count = 0
     
     while url and page_count < max_pages:
-        try:
-            response = requests.get(url, headers=headers, params=params if page_count == 0 else None)
-            if response.status_code != 200:
-                st.warning(f"Error al obtener datos del campus {campus_id}: {response.status_code}")
-                break
-            
-            data = response.json()
-            users.extend(data)
-            
-            # Paginación
-            url = response.links.get("next", {}).get("url")
-            page_count += 1
-            
-            # Rate limiting
-            time.sleep(0.1)
-            
-        except Exception as e:
-            st.error(f"Error de conexión para campus {campus_id}: {e}")
+        retry_count = 0
+        success = False
+        
+        while retry_count < max_retries and not success:
+            try:
+                # Rate limiting más conservador
+                time.sleep(0.5)  # Esperar 500ms entre peticiones
+                
+                response = requests.get(url, headers=headers, params=params if page_count == 0 else None)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    users.extend(data)
+                    success = True
+                    
+                    # Paginación
+                    url = response.links.get("next", {}).get("url")
+                    page_count += 1
+                    
+                elif response.status_code == 429:
+                    # Rate limit excedido
+                    retry_after = int(response.headers.get('Retry-After', 60))
+                    st.warning(f"⏳ Rate limit alcanzado para campus {campus_id}. Esperando {retry_after} segundos...")
+                    
+                    # Mostrar countdown
+                    countdown_placeholder = st.empty()
+                    for i in range(retry_after, 0, -1):
+                        countdown_placeholder.text(f"⏱️ Reintentando en {i} segundos...")
+                        time.sleep(1)
+                    countdown_placeholder.empty()
+                    
+                    retry_count += 1
+                    
+                elif response.status_code == 401:
+                    st.error(f"❌ Error de autenticación (401). Verifica tus credenciales.")
+                    return users
+                    
+                elif response.status_code == 403:
+                    st.error(f"❌ Acceso denegado (403) para campus {campus_id}.")
+                    return users
+                    
+                else:
+                    st.warning(f"⚠️ Error {response.status_code} para campus {campus_id}. Reintentando...")
+                    time.sleep(2)  # Esperar más tiempo en caso de otros errores
+                    retry_count += 1
+                    
+            except requests.exceptions.RequestException as e:
+                st.error(f"🔌 Error de conexión para campus {campus_id}: {e}")
+                time.sleep(2)
+                retry_count += 1
+            except Exception as e:
+                st.error(f"❌ Error inesperado para campus {campus_id}: {e}")
+                retry_count += 1
+        
+        if not success:
+            st.error(f"❌ No se pudieron obtener datos del campus {campus_id} después de {max_retries} intentos")
             break
     
     return users
@@ -233,47 +271,94 @@ with st.sidebar:
     
     # Botón para actualizar datos
     refresh_data = st.button("🔄 Actualizar Datos", type="primary", use_container_width=True)
+    
+    # Configuración avanzada
+    with st.expander("⚙️ Configuración Avanzada"):
+        rate_limit_delay = st.slider(
+            "Delay entre peticiones (segundos)", 
+            min_value=0.1, 
+            max_value=2.0, 
+            value=0.5, 
+            step=0.1,
+            help="Aumenta este valor si tienes problemas de rate limiting"
+        )
+        
+        max_retries = st.slider(
+            "Máximo número de reintentos", 
+            min_value=1, 
+            max_value=5, 
+            value=3,
+            help="Número de veces que se reintentará una petición fallida"
+        )
+        
+        show_detailed_errors = st.checkbox(
+            "Mostrar errores detallados", 
+            value=False,
+            help="Muestra información técnica adicional sobre errores"
+        )
 
 # Procesar datos si se seleccionaron campus
 if selected_campus and (refresh_data or 'users_data' not in st.session_state):
     all_users_data = []
     
+    # Mostrar información sobre límites
+    st.info(f"🔄 Cargando datos de {len(selected_campus)} campus. Esto puede tomar unos minutos debido a los límites de la API...")
+    
     # Barra de progreso
     progress_bar = st.progress(0)
     status_text = st.empty()
+    
+    # Configurar delay personalizado si está disponible
+    delay = rate_limit_delay if 'rate_limit_delay' in locals() else 0.5
+    retries = max_retries if 'max_retries' in locals() else 3
     
     for i, campus_key in enumerate(selected_campus):
         campus_info = campus_dict[campus_key]
         campus_id = campus_info['id']
         
-        status_text.text(f"📍 Cargando {campus_key}...")
+        status_text.text(f"📍 Cargando {campus_key} ({i+1}/{len(selected_campus)})...")
         
-        # Obtener usuarios activos
-        users = get_active_users_by_campus(campus_id, headers)
+        # Obtener usuarios activos con configuración personalizada
+        users = get_active_users_by_campus(campus_id, headers, max_retries=retries)
         
-        # Procesar datos
-        for user_location in users:
-            if isinstance(user_location.get('user'), dict):
-                user_data = {
-                    'login': user_location['user'].get('login'),
-                    'displayname': user_location['user'].get('displayname', user_location['user'].get('login')),
-                    'begin_at': user_location.get('begin_at'),
-                    'end_at': user_location.get('end_at'),
-                    'campus': campus_key.split(' (')[0],  # Nombre del campus sin país
-                    'country': campus_info['country'],
-                    'city': campus_info['city'],
-                    'host': user_location.get('host'),
-                    'campus_id': campus_id
-                }
-                all_users_data.append(user_data)
+        if users:  # Solo procesar si obtuvimos datos
+            # Procesar datos
+            for user_location in users:
+                if isinstance(user_location.get('user'), dict):
+                    user_data = {
+                        'login': user_location['user'].get('login'),
+                        'displayname': user_location['user'].get('displayname', user_location['user'].get('login')),
+                        'begin_at': user_location.get('begin_at'),
+                        'end_at': user_location.get('end_at'),
+                        'campus': campus_key.split(' (')[0],  # Nombre del campus sin país
+                        'country': campus_info['country'],
+                        'city': campus_info['city'],
+                        'host': user_location.get('host'),
+                        'campus_id': campus_id
+                    }
+                    all_users_data.append(user_data)
+        else:
+            st.warning(f"⚠️ No se obtuvieron datos del campus {campus_key}")
         
         # Actualizar progreso
         progress_bar.progress((i + 1) / len(selected_campus))
+        
+        # Delay adicional entre campus para evitar rate limiting
+        if i < len(selected_campus) - 1:  # No esperar después del último
+            time.sleep(delay)
     
     # Guardar en session state
     st.session_state.users_data = all_users_data
-    status_text.text("✅ ¡Datos cargados correctamente!")
-    time.sleep(1)
+    st.session_state.last_update = datetime.now()
+    
+    if all_users_data:
+        status_text.text("✅ ¡Datos cargados correctamente!")
+        st.success(f"✅ Se cargaron datos de {len(all_users_data)} usuarios activos")
+    else:
+        status_text.text("⚠️ No se encontraron usuarios activos en los campus seleccionados")
+        st.warning("⚠️ No se encontraron usuarios activos. Esto puede ser normal si es fuera del horario de clases.")
+    
+    time.sleep(2)
     status_text.empty()
     progress_bar.empty()
 
@@ -450,8 +535,11 @@ if 'users_data' in st.session_state and st.session_state.users_data:
         st.info(f"📊 **Mostrando:** {len(filtered_df)} usuarios")
     
     with col2:
-        last_update = datetime.now().strftime("%H:%M:%S")
-        st.info(f"🕒 **Última actualización:** {last_update}")
+        if 'last_update' in st.session_state:
+            last_update = st.session_state.last_update.strftime("%H:%M:%S")
+            st.info(f"🕒 **Última actualización:** {last_update}")
+        else:
+            st.info("🕒 **Última actualización:** No disponible")
 
 elif selected_campus:
     st.info("👆 Haz clic en '🔄 Actualizar Datos' para cargar la información")
@@ -461,6 +549,9 @@ else:
 # Footer
 st.markdown("---")
 st.markdown(
-    "💡 **Tip:** Los datos se actualizan en tiempo real. "
-    "Usa los filtros para enfocarte en campus específicos."
+    "💡 **Tips:**\n"
+    "- Los datos se actualizan manualmente con el botón 'Actualizar Datos'\n"
+    "- Si tienes errores 429, aumenta el delay en Configuración Avanzada\n"
+    "- Es normal no ver usuarios activos fuera del horario de clases\n"
+    "- Usa los filtros para enfocarte en campus específicos"
 )
