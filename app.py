@@ -4,6 +4,7 @@ import requests
 import plotly.express as px
 from datetime import datetime, timedelta
 import json
+import time
 
 # Configuración de la API de 42
 API_BASE = "https://api.intra.42.fr"
@@ -13,109 +14,165 @@ class FortyTwoAPI:
         self.client_id = client_id
         self.client_secret = client_secret
         self.access_token = None
+        self.rate_limit_remaining = 1200
+        self.rate_limit_reset = None
         self._authenticate()
     
     def _authenticate(self):
         """Obtener token de acceso de la API de 42"""
         auth_url = f"{API_BASE}/oauth/token"
         
-        # Método 1: Basic Auth (recomendado por 42)
-        import base64
-        credentials = f"{self.client_id}:{self.client_secret}"
-        encoded_credentials = base64.b64encode(credentials.encode()).decode()
-        
-        headers = {
-            'Authorization': f'Basic {encoded_credentials}',
-            'Content-Type': 'application/x-www-form-urlencoded'
-        }
-        
         data = {
-            'grant_type': 'client_credentials'
+            'grant_type': 'client_credentials',
+            'client_id': self.client_id,
+            'client_secret': self.client_secret
         }
         
         try:
-            response = requests.post(auth_url, headers=headers, data=data)
+            response = requests.post(auth_url, data=data)
             
             if response.status_code == 200:
-                self.access_token = response.json()['access_token']
+                token_data = response.json()
+                self.access_token = token_data['access_token']
                 st.success("✅ Autenticación exitosa con la API de 42")
             else:
-                # Si Basic Auth falla, intentar con parámetros en el body
-                st.warning("🔄 Probando método alternativo de autenticación...")
+                error_details = ""
+                try:
+                    error_info = response.json()
+                    error_details = f" - {error_info.get('error_description', error_info.get('error', 'Error desconocido'))}"
+                except:
+                    error_details = f" - HTTP {response.status_code}"
                 
-                data_alt = {
-                    'grant_type': 'client_credentials',
-                    'client_id': self.client_id,
-                    'client_secret': self.client_secret
-                }
+                st.error(f"❌ Error al autenticar con la API de 42{error_details}")
                 
-                response_alt = requests.post(auth_url, data=data_alt)
-                
-                if response_alt.status_code == 200:
-                    self.access_token = response_alt.json()['access_token']
-                    st.success("✅ Autenticación exitosa con método alternativo")
-                else:
-                    error_details = ""
-                    try:
-                        error_info = response.json()
-                        error_details = f" - {error_info.get('error_description', error_info.get('error', 'Error desconocido'))}"
-                    except:
-                        error_details = f" - HTTP {response.status_code}"
-                    
-                    st.error(f"❌ Error al autenticar con la API de 42{error_details}")
-                    
-                    # Mostrar ayuda para errores comunes
-                    if response.status_code == 401:
-                        st.warning("🔍 **Posibles causas:**")
-                        st.info("• Client ID o Client Secret incorrectos\n• La aplicación OAuth no está configurada correctamente\n• Verifica que el Redirect URI sea: `urn:ietf:wg:oauth:2.0:oob`")
-                    elif response.status_code == 400:
-                        st.warning("🔍 **Error de configuración:**")
-                        st.info("• La aplicación debe usar 'Client Credentials' flow\n• Verifica los scopes de la aplicación")
+                # Mostrar ayuda para errores comunes
+                if response.status_code == 401:
+                    st.warning("🔍 **Posibles causas:**")
+                    st.info("• Client ID o Client Secret incorrectos\n• La aplicación OAuth no está configurada correctamente\n• Verifica que tengas los scopes correctos")
+                elif response.status_code == 400:
+                    st.warning("🔍 **Error de configuración:**")
+                    st.info("• La aplicación debe usar 'Client Credentials' flow\n• Verifica los scopes de la aplicación")
                 
         except requests.exceptions.RequestException as e:
             st.error(f"❌ Error de conexión: {str(e)}")
             st.info("Verifica tu conexión a internet")
     
+    def _handle_rate_limit(self, response):
+        """Manejar límites de rate limiting"""
+        if 'X-RateLimit-Remaining' in response.headers:
+            self.rate_limit_remaining = int(response.headers['X-RateLimit-Remaining'])
+        
+        if 'X-RateLimit-Reset' in response.headers:
+            self.rate_limit_reset = int(response.headers['X-RateLimit-Reset'])
+        
+        # Si nos acercamos al límite, hacer pausa
+        if self.rate_limit_remaining < 10:
+            st.warning("⚠️ Acercándose al límite de rate limit, pausando...")
+            time.sleep(2)
+    
     def get_headers(self):
         return {'Authorization': f'Bearer {self.access_token}'}
     
-    def get_users_by_campus(self, campus_id, page=1, per_page=100):
-        """Obtener usuarios de un campus específico"""
-        url = f"{API_BASE}/v2/campus/{campus_id}/users"
-        params = {
-            'page': page,
-            'per_page': per_page,
-            'filter[kind]': 'student',  # Solo estudiantes
-            'sort': 'level',
-            'filter[active]': 'true'
-        }
-        response = requests.get(url, headers=self.get_headers(), params=params)
-        return response.json() if response.status_code == 200 else []
+    def get_users_by_campus(self, campus_id, max_pages=10):
+        """Obtener usuarios de un campus específico con paginación mejorada"""
+        all_users = []
+        page = 1
+        
+        while page <= max_pages:
+            url = f"{API_BASE}/v2/campus/{campus_id}/users"
+            params = {
+                'page': page,
+                'per_page': 100,
+                'sort': '-level'  # Ordenar por nivel descendente
+            }
+            
+            try:
+                response = requests.get(url, headers=self.get_headers(), params=params)
+                self._handle_rate_limit(response)
+                
+                if response.status_code == 200:
+                    users_data = response.json()
+                    
+                    # Si no hay usuarios, terminar
+                    if not users_data or len(users_data) == 0:
+                        break
+                    
+                    all_users.extend(users_data)
+                    
+                    # Si recibimos menos de 100, es la última página
+                    if len(users_data) < 100:
+                        break
+                    
+                    page += 1
+                    time.sleep(0.5)  # Pausa para respetar rate limit
+                    
+                elif response.status_code == 429:
+                    st.warning("⚠️ Rate limit alcanzado, pausando...")
+                    time.sleep(60)  # Pausa de 1 minuto
+                    continue
+                else:
+                    st.warning(f"⚠️ Error al obtener usuarios del campus {campus_id}: HTTP {response.status_code}")
+                    break
+                    
+            except requests.exceptions.RequestException as e:
+                st.error(f"❌ Error de conexión al obtener usuarios: {str(e)}")
+                break
+        
+        return all_users
     
     def get_all_campus(self):
-        """Obtener todos los campus"""
-        url = f"{API_BASE}/v2/campus"
-        response = requests.get(url, headers=self.get_headers())
-        return response.json() if response.status_code == 200 else []
-    
-    def get_user_cursus_details(self, user_id):
-        """Obtener detalles del cursus de un usuario"""
-        url = f"{API_BASE}/v2/users/{user_id}/cursus_users"
-        response = requests.get(url, headers=self.get_headers())
-        return response.json() if response.status_code == 200 else []
+        """Obtener todos los campus con paginación"""
+        all_campus = []
+        page = 1
+        
+        while True:
+            url = f"{API_BASE}/v2/campus"
+            params = {
+                'page': page,
+                'per_page': 100,
+                'sort': 'name'
+            }
+            
+            try:
+                response = requests.get(url, headers=self.get_headers(), params=params)
+                self._handle_rate_limit(response)
+                
+                if response.status_code == 200:
+                    campus_data = response.json()
+                    
+                    if not campus_data or len(campus_data) == 0:
+                        break
+                    
+                    all_campus.extend(campus_data)
+                    
+                    if len(campus_data) < 100:
+                        break
+                    
+                    page += 1
+                    time.sleep(0.5)
+                    
+                else:
+                    st.error(f"Error al obtener campus: HTTP {response.status_code}")
+                    break
+                    
+            except requests.exceptions.RequestException as e:
+                st.error(f"Error de conexión al obtener campus: {str(e)}")
+                break
+        
+        return all_campus
 
 class RankingProcessor:
     def __init__(self):
         # Definir los rangos basados en niveles de 42
         self.level_ranges = {
-            0: "Piscina",
-            1: "Rango 1 (Básico)",
-            2: "Rango 2 (Shell/C)",
-            3: "Rango 3 (Algoritmos)",
-            4: "Rango 4 (Sistemas)",
-            5: "Rango 5 (Redes/Web)",
-            6: "Rango 6 (Avanzado)",
-            7: "Rango 7+ (Especialización)"
+            0: "Piscina (0-1)",
+            1: "Rango 1 (1-2)",
+            2: "Rango 2 (2-3)",
+            3: "Rango 3 (3-4)",
+            4: "Rango 4 (4-5)",
+            5: "Rango 5 (5-6)",
+            6: "Rango 6 (6-7)",
+            7: "Rango 7+ (7+)"
         }
     
     def determine_range(self, level):
@@ -130,25 +187,35 @@ class RankingProcessor:
             return self.level_ranges.get(level_int, "Desconocido")
     
     def filter_active_students(self, users):
-        """Filtrar estudiantes activos (no en blackhole, activos recientes)"""
+        """Filtrar estudiantes con criterios más flexibles"""
         filtered = []
-        cutoff_date = datetime.now() - timedelta(days=90)  # 3 meses
+        cutoff_date = datetime.now() - timedelta(days=365)  # 1 año (más flexible)
         
         for user in users:
-            # Filtrar cuentas test
-            if user.get('kind') == 'test':
+            # Filtrar cuentas test y admin
+            if user.get('kind') in ['test', 'admin', 'staff']:
                 continue
             
-            # Filtrar blackholed
-            if user.get('blackholed_at'):
-                continue
+            # Incluir usuarios aunque estén en blackhole (algunos pueden estar temporalmente)
+            # Solo filtrar si han estado en blackhole por más de 6 meses
+            blackholed_at = user.get('blackholed_at')
+            if blackholed_at:
+                try:
+                    blackhole_date = datetime.fromisoformat(blackholed_at.replace('Z', '+00:00'))
+                    if datetime.now() - blackhole_date > timedelta(days=180):
+                        continue
+                except:
+                    pass
             
-            # Filtrar por actividad reciente
+            # Filtro de actividad más flexible
             last_seen = user.get('last_seen_at')
             if last_seen:
-                last_seen_date = datetime.fromisoformat(last_seen.replace('Z', '+00:00'))
-                if last_seen_date < cutoff_date:
-                    continue
+                try:
+                    last_seen_date = datetime.fromisoformat(last_seen.replace('Z', '+00:00'))
+                    if last_seen_date < cutoff_date:
+                        continue
+                except:
+                    pass
             
             filtered.append(user)
         
@@ -162,20 +229,31 @@ class RankingProcessor:
             cursus_data = user.get('cursus_users', [])
             main_cursus = None
             
-            # Buscar el cursus principal (42cursus)
+            # Buscar el cursus principal (42cursus o 42)
             for cursus in cursus_data:
-                if cursus.get('cursus', {}).get('name') == '42cursus':
+                cursus_name = cursus.get('cursus', {}).get('name', '').lower()
+                if cursus_name in ['42cursus', '42', 'common core']:
                     main_cursus = cursus
                     break
             
+            # Si no encontramos cursus principal, tomar el primero disponible
+            if not main_cursus and cursus_data:
+                main_cursus = cursus_data[0]
+            
             if not main_cursus:
+                continue
+            
+            level = main_cursus.get('level', 0)
+            
+            # Solo incluir usuarios con nivel > 0 para filtrar inactive
+            if level <= 0:
                 continue
             
             user_data = {
                 'login': user.get('login'),
                 'display_name': user.get('displayname', user.get('login')),
-                'level': main_cursus.get('level', 0),
-                'range': self.determine_range(main_cursus.get('level')),
+                'level': level,
+                'range': self.determine_range(level),
                 'grade': main_cursus.get('grade'),
                 'campus': campus_info.get('name', 'Unknown'),
                 'country': campus_info.get('country', 'Unknown'),
@@ -183,7 +261,8 @@ class RankingProcessor:
                 'blackholed_at': main_cursus.get('blackholed_at'),
                 'last_seen': user.get('last_seen_at'),
                 'wallet': user.get('wallet', 0),
-                'correction_points': user.get('correction_point', 0)
+                'correction_points': user.get('correction_point', 0),
+                'cursus_name': main_cursus.get('cursus', {}).get('name', 'Unknown')
             }
             
             processed_data.append(user_data)
@@ -236,11 +315,21 @@ def create_streamlit_dashboard():
                     
                 if not (client_id and client_secret):
                     return
+        
+        # Configuración adicional
+        st.header("🔧 Configuración Avanzada")
+        max_pages = st.slider("Máximo páginas por campus", 1, 20, 5, help="Más páginas = más datos pero más lento")
+        min_level = st.slider("Nivel mínimo", 0.0, 10.0, 0.1, 0.1, help="Filtrar estudiantes por nivel mínimo")
     
     # Inicializar API
     try:
         api = FortyTwoAPI(client_id, client_secret)
         processor = RankingProcessor()
+        
+        if not api.access_token:
+            st.error("❌ No se pudo obtener token de acceso")
+            return
+            
     except Exception as e:
         st.error(f"Error al conectar con la API: {e}")
         return
@@ -252,6 +341,8 @@ def create_streamlit_dashboard():
     if not all_campus:
         st.error("No se pudieron cargar los campus")
         return
+    
+    st.success(f"✅ Cargados {len(all_campus)} campus")
     
     # Crear diccionario de países y campus
     countries = {}
@@ -266,11 +357,17 @@ def create_streamlit_dashboard():
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        selected_countries = st.multiselect(
+        # Mostrar países con número de campus
+        country_options = {f"{country} ({len(campus_list)} campus)": country 
+                          for country, campus_list in countries.items()}
+        
+        selected_country_labels = st.multiselect(
             "Países",
-            options=list(countries.keys()),
-            default=list(countries.keys())[:5]  # Primeros 5 países por defecto
+            options=list(country_options.keys()),
+            default=list(country_options.keys())[:3]  # Primeros 3 países por defecto
         )
+        
+        selected_countries = [country_options[label] for label in selected_country_labels]
     
     with col2:
         # Campus disponibles según países seleccionados
@@ -279,11 +376,13 @@ def create_streamlit_dashboard():
             available_campus.extend(countries[country])
         
         campus_options = {f"{c['name']} ({c['country']})": c for c in available_campus}
-        selected_campus = st.multiselect(
+        selected_campus_labels = st.multiselect(
             "Campus",
             options=list(campus_options.keys()),
-            default=list(campus_options.keys())
+            default=list(campus_options.keys())[:5]  # Máximo 5 campus por defecto
         )
+        
+        selected_campus = [campus_options[label] for label in selected_campus_labels]
     
     with col3:
         selected_ranges = st.multiselect(
@@ -292,34 +391,49 @@ def create_streamlit_dashboard():
             default=list(processor.level_ranges.values())  # Seleccionar todos por defecto
         )
     
+    # Mostrar información antes de cargar
+    if selected_campus:
+        st.info(f"📊 Se cargarán datos de {len(selected_campus)} campus. Estimado: {len(selected_campus) * max_pages * 100} usuarios máximo.")
+    
     # Botón para cargar datos
     if st.button("🔄 Cargar Ranking", type="primary"):
+        if not selected_campus:
+            st.warning("⚠️ Selecciona al menos un campus")
+            return
+        
         all_student_data = []
         
         # Barra de progreso
         progress_bar = st.progress(0)
         status_text = st.empty()
         
-        selected_campus_objects = [campus_options[name] for name in selected_campus]
-        
-        for i, campus in enumerate(selected_campus_objects):
-            status_text.text(f"Cargando {campus['name']}...")
+        for i, campus in enumerate(selected_campus):
+            status_text.text(f"Cargando {campus['name']} ({i+1}/{len(selected_campus)})...")
             
             # Obtener estudiantes del campus
-            students = api.get_users_by_campus(campus['id'])
+            students = api.get_users_by_campus(campus['id'], max_pages=max_pages)
             st.write(f"📊 {campus['name']}: {len(students)} usuarios obtenidos")
+            
+            if len(students) == 0:
+                st.warning(f"⚠️ {campus['name']}: No se obtuvieron usuarios. Puede ser un campus vacío o con restricciones de acceso.")
+                continue
             
             # Filtrar estudiantes activos
             active_students = processor.filter_active_students(students)
-            st.write(f"✅ {campus['name']}: {len(active_students)} estudiantes activos")
+            st.write(f"✅ {campus['name']}: {len(active_students)} estudiantes filtrados")
             
             # Procesar datos
             processed_students = processor.process_user_data(active_students, campus)
             st.write(f"🎯 {campus['name']}: {len(processed_students)} estudiantes procesados")
+            
+            # Filtrar por nivel mínimo
+            processed_students = [s for s in processed_students if s['level'] >= min_level]
+            st.write(f"📈 {campus['name']}: {len(processed_students)} estudiantes con nivel >= {min_level}")
+            
             all_student_data.extend(processed_students)
             
             # Actualizar progreso
-            progress_bar.progress((i + 1) / len(selected_campus_objects))
+            progress_bar.progress((i + 1) / len(selected_campus))
         
         status_text.text("¡Datos cargados!")
         
@@ -328,17 +442,21 @@ def create_streamlit_dashboard():
         
         # Debug: mostrar información sobre los datos
         if len(all_student_data) > 0:
-            st.write(f"📈 Total de estudiantes cargados: {len(all_student_data)}")
+            st.success(f"📈 Total de estudiantes cargados: {len(all_student_data)}")
             if len(df) > 0:
                 ranges_found = df['range'].value_counts()
                 st.write("🏷️ Rangos encontrados:", ranges_found.to_dict())
+                
+                cursus_found = df['cursus_name'].value_counts()
+                st.write("📚 Cursus encontrados:", cursus_found.to_dict())
         
         if df.empty:
-            st.warning("⚠️ No se encontraron estudiantes en los campus seleccionados")
-            st.info("💡 Esto puede ocurrir si:")
-            st.info("• Los campus no tienen estudiantes activos en los últimos 3 meses")
-            st.info("• Los estudiantes no tienen cursus '42cursus' configurado")
-            st.info("• Hay problemas con la API de 42")
+            st.warning("⚠️ No se encontraron estudiantes válidos en los campus seleccionados")
+            st.info("💡 Posibles causas:")
+            st.info("• Los campus seleccionados no tienen estudiantes activos")
+            st.info("• El nivel mínimo es muy alto")
+            st.info("• Problemas de permisos con la API")
+            st.info("• Los estudiantes no tienen cursus configurado")
             return
         
         # Filtrar por rangos seleccionados
@@ -380,6 +498,16 @@ def create_streamlit_dashboard():
         )
         st.plotly_chart(fig, use_container_width=True)
         
+        # Distribución por país
+        st.header("🌍 Distribución por País")
+        country_counts = df_filtered['country'].value_counts()
+        fig2 = px.pie(
+            values=country_counts.values,
+            names=country_counts.index,
+            title="Estudiantes por País"
+        )
+        st.plotly_chart(fig2, use_container_width=True)
+        
         # Ranking principal
         st.header("🏆 Ranking Global")
         
@@ -412,10 +540,28 @@ def create_streamlit_dashboard():
             country_data = df_filtered[df_filtered['country'] == country].head(10)
             if not country_data.empty:
                 st.subheader(f"🏁 {country}")
+                country_data['posicion_pais'] = range(1, len(country_data) + 1)
                 st.dataframe(
-                    country_data[['login', 'level', 'range', 'campus']],
+                    country_data[['posicion_pais', 'login', 'level', 'range', 'campus']],
+                    column_config={
+                        'posicion_pais': st.column_config.NumberColumn('Pos.', width="small"),
+                        'login': st.column_config.TextColumn('Login', width="medium"),
+                        'level': st.column_config.NumberColumn('Nivel', width="small", format="%.2f"),
+                        'range': st.column_config.TextColumn('Rango', width="medium"),
+                        'campus': st.column_config.TextColumn('Campus', width="medium")
+                    },
                     hide_index=True
                 )
+        
+        # Opción de descarga
+        st.header("💾 Descargar Datos")
+        csv = df_sorted.to_csv(index=False)
+        st.download_button(
+            label="📥 Descargar ranking completo (CSV)",
+            data=csv,
+            file_name=f"42_ranking_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+            mime="text/csv"
+        )
 
 if __name__ == "__main__":
     create_streamlit_dashboard()
