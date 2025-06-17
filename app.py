@@ -23,11 +23,34 @@ class FortyTwoAPI:
             'client_id': self.client_id,
             'client_secret': self.client_secret
         }
-        response = requests.post(auth_url, data=data)
-        if response.status_code == 200:
-            self.access_token = response.json()['access_token']
-        else:
-            st.error("Error al autenticar con la API de 42")
+        
+        try:
+            response = requests.post(auth_url, data=data)
+            
+            if response.status_code == 200:
+                self.access_token = response.json()['access_token']
+                st.success("✅ Autenticación exitosa con la API de 42")
+            else:
+                error_details = ""
+                try:
+                    error_info = response.json()
+                    error_details = f" - {error_info.get('error_description', error_info.get('error', 'Error desconocido'))}"
+                except:
+                    error_details = f" - HTTP {response.status_code}"
+                
+                st.error(f"❌ Error al autenticar con la API de 42{error_details}")
+                
+                # Mostrar ayuda para errores comunes
+                if response.status_code == 401:
+                    st.warning("🔍 **Posibles causas:**")
+                    st.info("• Client ID o Client Secret incorrectos\n• La aplicación OAuth no está configurada correctamente\n• Las credenciales han expirado")
+                elif response.status_code == 400:
+                    st.warning("🔍 **Error de configuración:**")
+                    st.info("• Verifica que el grant_type sea 'client_credentials'\n• Revisa los parámetros de la aplicación OAuth")
+                
+        except requests.exceptions.RequestException as e:
+            st.error(f"❌ Error de conexión: {str(e)}")
+            st.info("Verifica tu conexión a internet")
     
     def get_headers(self):
         return {'Authorization': f'Bearer {self.access_token}'}
@@ -168,11 +191,26 @@ def create_streamlit_dashboard():
             
             # Campos temporales para desarrollo
             with st.expander("🔧 Configuración temporal (solo para desarrollo)"):
-                client_id = st.text_input("Client ID", type="password", help="Obtén esto de tu app OAuth en 42")
-                client_secret = st.text_input("Client Secret", type="password", help="Secret de tu app OAuth en 42")
+                st.markdown("**📋 Instrucciones para obtener credenciales:**")
+                st.markdown("""
+                1. Ve a [profile.intra.42.fr/oauth/applications](https://profile.intra.42.fr/oauth/applications)
+                2. Haz clic en "New Application"
+                3. Configura:
+                   - **Name**: Cualquier nombre (ej: "42 Ranking Dashboard")
+                   - **Redirect URI**: `urn:ietf:wg:oauth:2.0:oob`
+                   - **Scopes**: Selecciona `public`
+                4. Copia las credenciales generadas
+                """)
                 
+                client_id = st.text_input("Client ID", type="password", help="UID de tu aplicación OAuth")
+                client_secret = st.text_input("Client Secret", type="password", help="Secret de tu aplicación OAuth")
+                
+                if client_id and client_secret:
+                    st.success("🔑 Credenciales introducidas - Haz clic en 'Cargar Ranking' para probar")
+                else:
+                    st.warning("⚠️ Introduce ambas credenciales para continuar")
+                    
                 if not (client_id and client_secret):
-                    st.info("💡 **Para obtener credenciales:**\n1. Ve a profile.intra.42.fr/oauth/applications\n2. Crea una nueva aplicación\n3. Copia Client ID y Secret")
                     return
     
     # Inicializar API
