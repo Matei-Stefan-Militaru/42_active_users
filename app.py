@@ -237,7 +237,7 @@ if should_refresh:
             
             st.success(f"✅ {len(users_raw)} registros cargados, {len(df)} usuarios procesados")
         else:
-            st.warning(f"⚠️ No se encontraron usuarios activos en {selected_campus_name}")
+            st.warning(f"⚠️ No se encontraron sesiones iniciadas en {selected_campus_name}")
             st.session_state.users_data = pd.DataFrame()
 
 # Mostrar dashboard si hay datos
@@ -248,7 +248,7 @@ if 'users_data' in st.session_state and not st.session_state.users_data.empty:
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        st.metric("👥 Total Sesiones", len(df))
+        st.metric("🚀 Sesiones Iniciadas", len(df))
     
     with col2:
         unique_users = df['login'].nunique()
@@ -275,37 +275,36 @@ if 'users_data' in st.session_state and not st.session_state.users_data.empty:
             df_viz['hour'] = df_viz['begin_at'].dt.hour
             df_viz['date'] = df_viz['begin_at'].dt.date
             
-            # Gráfico de actividad por hora
-            st.markdown("## 📈 Actividad por Hora del Día")
+            # Gráfico de actividad por hora (usando el código que funciona)
+            st.markdown("## 📈 Sesiones Iniciadas por Hora del Día")
             
-            hour_counts = df_viz['hour'].value_counts().reindex(range(24), fill_value=0)
+            # Información temporal
+            if len(df_viz) > 0:
+                fecha_min = df_viz['begin_at'].min().strftime("%d/%m/%Y %H:%M")
+                fecha_max = df_viz['begin_at'].max().strftime("%d/%m/%Y %H:%M")
+                st.info(f"📅 **Período de datos:** {fecha_min} → {fecha_max}")
             
-            fig = go.Figure()
-            fig.add_trace(go.Bar(
-                x=hour_counts.index,
-                y=hour_counts.values,
-                marker_color='rgba(102, 126, 234, 0.8)',
-                name='Sesiones Activas',
-                hovertemplate='<b>Hora:</b> %{x}:00<br><b>Sesiones:</b> %{y}<extra></extra>'
-            ))
+            # Usar el gráfico que funciona (basado en tu código)
+            df_viz["hora"] = pd.to_datetime(df_viz["begin_at"]).dt.hour
+            counts = df_viz["hora"].value_counts().sort_index()
             
-            fig.update_layout(
-                title=f"Distribución Horaria - Campus {selected_campus_name}",
-                xaxis_title="Hora del Día",
-                yaxis_title="Número de Sesiones",
+            chart = px.bar(
+                x=counts.index, 
+                y=counts.values, 
+                labels={"x": "Hora del Día", "y": "Sesiones Iniciadas"}, 
+                title=f"Sesiones Iniciadas por Hora - Campus {selected_campus_name}"
+            )
+            
+            # Personalizar el gráfico
+            chart.update_traces(marker_color='rgba(102, 126, 234, 0.8)')
+            chart.update_layout(
                 height=400,
                 showlegend=False,
-                xaxis=dict(
-                    tickmode='linear',
-                    tick0=0,
-                    dtick=2,
-                    range=[-0.5, 23.5]
-                ),
-                yaxis=dict(gridcolor='lightgray'),
+                xaxis=dict(tickmode='linear', tick0=0, dtick=1),
                 plot_bgcolor='white'
             )
             
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(chart, use_container_width=True)
             
             # Top equipos más utilizados
             if len(df) > 0:
@@ -326,9 +325,9 @@ if 'users_data' in st.session_state and not st.session_state.users_data.empty:
                     ))
                     
                     fig_hosts.update_layout(
-                        title="Top 10 Equipos",
+                        title="Top 10 Equipos Más Utilizados",
                         height=400,
-                        xaxis_title="Número de Sesiones",
+                        xaxis_title="Sesiones Iniciadas",
                         yaxis_title="Equipo",
                         showlegend=False
                     )
@@ -349,9 +348,9 @@ if 'users_data' in st.session_state and not st.session_state.users_data.empty:
                     ))
                     
                     fig_users.update_layout(
-                        title="Top 10 Usuarios Activos",
+                        title="Top 10 Usuarios Más Activos",
                         height=400,
-                        xaxis_title="Número de Sesiones",
+                        xaxis_title="Sesiones Iniciadas",
                         yaxis_title="Usuario",
                         showlegend=False
                     )
@@ -361,8 +360,8 @@ if 'users_data' in st.session_state and not st.session_state.users_data.empty:
     except Exception as e:
         st.warning(f"⚠️ Error al procesar datos para visualización: {str(e)}")
     
-    # Tabla de usuarios activos
-    st.markdown("## 👥 Sesiones Activas")
+    # Tabla de sesiones iniciadas
+    st.markdown("## 🚀 Sesiones Iniciadas")
     
     # Preparar datos para mostrar
     display_df = df[['login', 'displayname', 'host', 'begin_at']].copy()
@@ -406,7 +405,7 @@ if 'users_data' in st.session_state and not st.session_state.users_data.empty:
 
 else:
     # Estado inicial
-    st.info(f"👆 Selecciona un campus y haz clic en **'Actualizar Ahora'** para cargar los datos")
+    st.info(f"👆 Selecciona un campus y haz clic en **'Actualizar Ahora'** para cargar las sesiones iniciadas")
     
     # Mostrar información de ayuda
     with st.expander("ℹ️ Información"):
@@ -417,7 +416,13 @@ else:
         - Paris: ID 1
         - Málaga: ID 101
         
-        **Características:**
+        **Qué muestra este dashboard:**
+        - 🚀 **Sesiones iniciadas:** Cada vez que un estudiante inicia sesión en un equipo
+        - 📊 **Distribución temporal:** Cuándo se inician más sesiones durante el día
+        - 💻 **Equipos más utilizados:** Qué computadores son más populares
+        - 👤 **Usuarios más activos:** Quién inicia más sesiones
+        
+        **Características técnicas:**
         - ✅ Cache inteligente para mejor rendimiento
         - ✅ Manejo de rate limits automático
         - ✅ Visualizaciones interactivas
