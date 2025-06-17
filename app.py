@@ -119,57 +119,99 @@ def get_campus(headers):
 
 # Función para obtener usuarios activos
 def get_active_users(campus_id, headers, days_back=1):
-    """Obtener usuarios activos"""
+    """Obtener usuarios activos usando múltiples enfoques"""
     users = []
-    page = 1
-    now = datetime.utcnow()
-    past_date = now - timedelta(days=days_back)
-    date_filter = past_date.strftime("%Y-%m-%dT%H:%M:%SZ")
-    
     progress_bar = st.progress(0)
     status_text = st.empty()
     
-    max_pages = 20  # Límite de páginas para evitar bucles infinitos
+    # Método 1: Intentar con locations (usuarios actualmente en el campus)
+    try:
+        status_text.text("🔍 Buscando usuarios actualmente en el campus...")
+        locations_url = f"https://api.intra.42.fr/v2/campus/{campus_id}/locations?page[size]=100"
+        
+        res = requests.get(locations_url, headers=headers, timeout=15)
+        if res.status_code == 200:
+            locations = res.json()
+            if locations:
+                # Extraer usuarios de las ubicaciones activas
+                location_users = []
+                for location in locations:
+                    if location.get('user') and location.get('end_at') is None:  # Usuario actualmente conectado
+                        user_data = location['user']
+                        user_data['last_location'] = location.get('begin_at')
+                        location_users.append(user_data)
+                
+                if location_users:
+                    users.extend(location_users)
+                    progress_bar.progress(0.5)
+                    status_text.text(f"✅ Encontrados {len(location_users)} usuarios en ubicaciones activas")
+    except Exception as e:
+        st.warning(f"⚠️ Error obteniendo locations: {str(e)}")
     
-    while page <= max_pages:
-        try:
-            status_text.text(f"Cargando página {page}...")
-            
-            url = (
-                f"https://api.intra.42.fr/v2/campus/{campus_id}/users?"
-                f"page[size]=100&page[number]={page}&"
-                f"sort=-updated_at&filter[updated_at]={date_filter},"
-            )
-            
-            res = requests.get(url, headers=headers, timeout=15)
-            
-            if res.status_code == 200:
-                data = res.json()
-                if not data:  # No más datos
+    # Método 2: Si no hay usuarios en locations, buscar por updated_at (como respaldo)
+    if not users:
+        status_text.text("🔍 Buscando usuarios con actividad reciente...")
+        page = 1
+        now = datetime.utcnow()
+        past_date = now - timedelta(days=days_back)
+        date_filter = past_date.strftime("%Y-%m-%dT%H:%M:%SZ")
+        
+        max_pages = 10  # Reducido para ser más eficiente
+        
+        while page <= max_pages:
+            try:
+                status_text.text(f"Cargando página {page} de usuarios recientes...")
+                
+                url = (
+                    f"https://api.intra.42.fr/v2/campus/{campus_id}/users?"
+                    f"page[size]=100&page[number]={page}&"
+                    f"sort=-updated_at&filter[updated_at]={date_filter},"
+                )
+                
+                res = requests.get(url, headers=headers, timeout=15)
+                
+                if res.status_code == 200:
+                    data = res.json()
+                    if not data:  # No más datos
+                        break
+                        
+                    users.extend(data)
+                    page += 1
+                    
+                    # Actualizar progreso
+                    progress = 0.5 + (page / max_pages) * 0.5
+                    progress_bar.progress(min(progress, 1.0))
+                    
+                elif res.status_code == 429:
+                    retry_after = int(res.headers.get('Retry-After', 2))
+                    status_text.text(f"⏳ Rate limit - esperando {retry_after}s...")
+                    time.sleep(retry_after)
+                    
+                else:
+                    st.warning(f"⚠️ Error HTTP {res.status_code} en página {page}")
                     break
                     
-                users.extend(data)
-                page += 1
-                
-                # Actualizar progreso
-                progress = min(page / max_pages, 1.0)
-                progress_bar.progress(progress)
-                
-            elif res.status_code == 429:
-                retry_after = int(res.headers.get('Retry-After', 2))
-                status_text.text(f"⏳ Rate limit - esperando {retry_after}s...")
-                time.sleep(retry_after)
-                
-            else:
-                st.warning(f"⚠️ Error HTTP {res.status_code} en página {page}")
+            except requests.exceptions.Timeout:
+                st.warning(f"⚠️ Timeout en página {page} - continuando...")
                 break
-                
-        except requests.exceptions.Timeout:
-            st.warning(f"⚠️ Timeout en página {page} - continuando...")
-            break
+            except Exception as e:
+                st.error(f"❌ Error en página {page}: {str(e)}")
+                break
+    
+    # Método 3: Si aún no hay usuarios, probar obtener usuarios del campus sin filtro de fecha
+    if not users:
+        try:
+            status_text.text("🔍 Obteniendo usuarios del campus (sin filtro temporal)...")
+            url = f"https://api.intra.42.fr/v2/campus/{campus_id}/users?page[size]=50&sort=-updated_at"
+            
+            res = requests.get(url, headers=headers, timeout=15)
+            if res.status_code == 200:
+                data = res.json()
+                if data:
+                    users.extend(data[:20])  # Tomar solo los primeros 20 para mostrar algo
+                    status_text.text(f"ℹ️ Mostrando los 20 usuarios más recientes del campus")
         except Exception as e:
-            st.error(f"❌ Error en página {page}: {str(e)}")
-            break
+            st.warning(f"⚠️ Error en método de respaldo: {str(e)}")
     
     progress_bar.empty()
     status_text.empty()
@@ -223,18 +265,46 @@ if refresh_button or (auto_refresh and 'users_data' not in st.session_state):
             st.info(f"📝 No se encontraron usuarios activos en {selected_campus} en los últimos {days_back} día(s).")
             st.session_state.users_data = pd.DataFrame()
         else:
-            # Procesar datos
-            df = pd.DataFrame([
-                {
-                    "Login": user["login"],
-                    "Nombre": user["displayname"],
-                    "Correo": user["email"],
-                    "Última conexión": user["updated_at"],
-                    "Nivel": user.get("cursus_users", [{}])[0].get("level", 0) if user.get("cursus_users") else 0,
-                    "Campus": user.get("campus", [{}])[0].get("name", "N/A") if user.get("campus") else "N/A"
-                }
-                for user in users
-            ])
+            # Procesar datos - manejar diferentes formatos de datos
+            df_data = []
+            for user in users:
+                try:
+                    # Determinar la fecha de última actividad
+                    last_activity = user.get("last_location") or user.get("updated_at") or user.get("created_at")
+                    
+                    user_info = {
+                        "Login": user.get("login", "N/A"),
+                        "Nombre": user.get("displayname", "N/A"),
+                        "Correo": user.get("email", "N/A"),
+                        "Última conexión": last_activity,
+                        "Estado": "🟢 En campus" if user.get("last_location") else "🔵 Activo recientemente",
+                        "Nivel": 0,
+                        "Campus": "N/A"
+                    }
+                    
+                    # Obtener nivel del cursus
+                    if user.get("cursus_users"):
+                        for cursus in user.get("cursus_users", []):
+                            if cursus.get("cursus", {}).get("name") == "42cursus":
+                                user_info["Nivel"] = cursus.get("level", 0)
+                                break
+                        else:
+                            # Si no hay 42cursus, tomar el primer cursus disponible
+                            user_info["Nivel"] = user.get("cursus_users", [{}])[0].get("level", 0)
+                    
+                    # Obtener campus
+                    if user.get("campus"):
+                        if isinstance(user["campus"], list) and user["campus"]:
+                            user_info["Campus"] = user["campus"][0].get("name", "N/A")
+                        else:
+                            user_info["Campus"] = user.get("campus", {}).get("name", "N/A")
+                    
+                    df_data.append(user_info)
+                except Exception as e:
+                    st.warning(f"⚠️ Error procesando usuario: {str(e)}")
+                    continue
+            
+            df = pd.DataFrame(df_data)
             
             # Procesar timestamps
             df["Última conexión"] = pd.to_datetime(df["Última conexión"]).dt.tz_localize(None)
@@ -369,8 +439,22 @@ if 'users_data' in st.session_state and not st.session_state.users_data.empty:
         filtered_df = filtered_df[filtered_df['Nivel'] >= min_level]
     
     # Formatear para mostrar
-    display_df = filtered_df[['Login', 'Nombre', 'Nivel', 'Última conexión']].copy()
-    display_df['Última conexión'] = display_df['Última conexión'].dt.strftime('%d/%m/%Y %H:%M')
+    display_df = filtered_df[['Login', 'Nombre', 'Estado', 'Nivel', 'Última conexión']].copy()
+    
+    # Formatear fechas de manera segura
+    def safe_format_date(date_val):
+        try:
+            if pd.isna(date_val):
+                return "N/A"
+            if isinstance(date_val, str):
+                # Si ya es string, intentar parsearlo y reformatearlo
+                parsed_date = pd.to_datetime(date_val, utc=True).tz_localize(None)
+                return parsed_date.strftime('%d/%m/%Y %H:%M')
+            return date_val.strftime('%d/%m/%Y %H:%M')
+        except:
+            return str(date_val) if date_val else "N/A"
+    
+    display_df['Última conexión'] = display_df['Última conexión'].apply(safe_format_date)
     
     st.dataframe(
         display_df,
