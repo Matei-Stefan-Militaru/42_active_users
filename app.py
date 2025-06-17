@@ -156,29 +156,16 @@ def create_streamlit_dashboard():
     # Sidebar para configuración
     with st.sidebar:
         st.header("⚙️ Configuración API")
-        st.success("✅ App configurada correctamente")
         st.info("**Límites:** 2 req/segundo, 1200 req/hora")
         
-        # Usar secrets para producción, fallback para desarrollo local
+        # Usar secrets para credenciales
         try:
             client_id = st.secrets["api"]["client_id"]
             client_secret = st.secrets["api"]["client_secret"]
-            st.success("🔒 Usando credenciales seguras")
+            st.success("🔒 Credenciales configuradas correctamente")
         except (KeyError, FileNotFoundError):
-            st.warning("⚠️ Modo desarrollo - usando credenciales locales")
-            client_id = st.text_input(
-                "Client ID", 
-                value="u-s4t2ud-ce86c52b0fe2391b195c884ff1860b9fdf6a301890b0126ed7fd06f8fd7258ea",
-                type="password"
-            )
-            client_secret = st.text_input(
-                "Client Secret", 
-                value="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",
-                type="password"
-            )
-        
-        if not (client_id and client_secret):
-            st.error("❌ Credenciales de API no configuradas")
+            st.error("❌ Credenciales de API no configuradas en secrets.toml")
+            st.info("Por favor, configura las credenciales en el archivo secrets.toml")
             return
     
     # Inicializar API
