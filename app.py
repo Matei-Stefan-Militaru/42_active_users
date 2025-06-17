@@ -18,35 +18,59 @@ class FortyTwoAPI:
     def _authenticate(self):
         """Obtener token de acceso de la API de 42"""
         auth_url = f"{API_BASE}/oauth/token"
+        
+        # Método 1: Basic Auth (recomendado por 42)
+        import base64
+        credentials = f"{self.client_id}:{self.client_secret}"
+        encoded_credentials = base64.b64encode(credentials.encode()).decode()
+        
+        headers = {
+            'Authorization': f'Basic {encoded_credentials}',
+            'Content-Type': 'application/x-www-form-urlencoded'
+        }
+        
         data = {
-            'grant_type': 'client_credentials',
-            'client_id': self.client_id,
-            'client_secret': self.client_secret
+            'grant_type': 'client_credentials'
         }
         
         try:
-            response = requests.post(auth_url, data=data)
+            response = requests.post(auth_url, headers=headers, data=data)
             
             if response.status_code == 200:
                 self.access_token = response.json()['access_token']
                 st.success("✅ Autenticación exitosa con la API de 42")
             else:
-                error_details = ""
-                try:
-                    error_info = response.json()
-                    error_details = f" - {error_info.get('error_description', error_info.get('error', 'Error desconocido'))}"
-                except:
-                    error_details = f" - HTTP {response.status_code}"
+                # Si Basic Auth falla, intentar con parámetros en el body
+                st.warning("🔄 Probando método alternativo de autenticación...")
                 
-                st.error(f"❌ Error al autenticar con la API de 42{error_details}")
+                data_alt = {
+                    'grant_type': 'client_credentials',
+                    'client_id': self.client_id,
+                    'client_secret': self.client_secret
+                }
                 
-                # Mostrar ayuda para errores comunes
-                if response.status_code == 401:
-                    st.warning("🔍 **Posibles causas:**")
-                    st.info("• Client ID o Client Secret incorrectos\n• La aplicación OAuth no está configurada correctamente\n• Las credenciales han expirado")
-                elif response.status_code == 400:
-                    st.warning("🔍 **Error de configuración:**")
-                    st.info("• Verifica que el grant_type sea 'client_credentials'\n• Revisa los parámetros de la aplicación OAuth")
+                response_alt = requests.post(auth_url, data=data_alt)
+                
+                if response_alt.status_code == 200:
+                    self.access_token = response_alt.json()['access_token']
+                    st.success("✅ Autenticación exitosa con método alternativo")
+                else:
+                    error_details = ""
+                    try:
+                        error_info = response.json()
+                        error_details = f" - {error_info.get('error_description', error_info.get('error', 'Error desconocido'))}"
+                    except:
+                        error_details = f" - HTTP {response.status_code}"
+                    
+                    st.error(f"❌ Error al autenticar con la API de 42{error_details}")
+                    
+                    # Mostrar ayuda para errores comunes
+                    if response.status_code == 401:
+                        st.warning("🔍 **Posibles causas:**")
+                        st.info("• Client ID o Client Secret incorrectos\n• La aplicación OAuth no está configurada correctamente\n• Verifica que el Redirect URI sea: `urn:ietf:wg:oauth:2.0:oob`")
+                    elif response.status_code == 400:
+                        st.warning("🔍 **Error de configuración:**")
+                        st.info("• La aplicación debe usar 'Client Credentials' flow\n• Verifica los scopes de la aplicación")
                 
         except requests.exceptions.RequestException as e:
             st.error(f"❌ Error de conexión: {str(e)}")
