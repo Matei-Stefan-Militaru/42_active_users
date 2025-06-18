@@ -91,7 +91,7 @@ should_load_data = (
     (auto_refresh and 'users_data' not in st.session_state) or
     (config_changed and auto_load)
 )
-  if should_load_data:
+if should_load_data:
     # Mostrar indicador de carga automática si es por cambio de configuración
     loading_message = f"🔍 Cargando usuarios activos de {selected_campus}..."
     if config_changed and not refresh_button:
