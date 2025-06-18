@@ -31,6 +31,40 @@ def render_sidebar():
         
         st.markdown("---")
         
+        # Obtener credenciales
+        credentials = st.secrets.get("api42", {})
+        client_id = credentials.get("client_id")
+        client_secret = credentials.get("client_secret")
+
+        if not client_id or not client_secret:
+            st.error("❌ Faltan credenciales en los secrets. Verifica que estén correctamente configuradas en [api42].")
+            st.stop()
+        
+        # Obtener token para cargar campus
+        token = get_auth_token(client_id, client_secret)
+        if not token:
+            st.error("❌ Error de autenticación")
+            st.stop()
+            
+        headers = {"Authorization": f"Bearer {token}"}
+        
+        # Obtener debug_mode del estado si existe
+        debug_mode_for_campus = st.session_state.get('debug_mode_campus', False)
+        
+        campus_list = get_campus(headers, debug_mode_for_campus)
+        
+        if not campus_list:
+            st.error("❌ No se pudieron cargar los campus")
+            st.stop()
+            
+        # Crear diccionarios organizados por país
+        campus_by_country = {}
+        for campus in campus_list:
+            country = campus.get("country", "Sin País")
+            if country not in campus_by_country:
+                campus_by_country[country] = []
+            campus_by_country[country].append(campus)
+        
         # Configuración avanzada
         with st.expander("⚙️ Opciones Avanzadas"):
             days_back = st.slider("Días hacia atrás", 1, 30, DEFAULT_DAYS_BACK)
@@ -71,40 +105,6 @@ def render_sidebar():
                 st.markdown(f"- {country}: {count} campus")
         
         st.markdown("---")
-        
-        # Obtener credenciales
-        credentials = st.secrets.get("api42", {})
-        client_id = credentials.get("client_id")
-        client_secret = credentials.get("client_secret")
-
-        if not client_id or not client_secret:
-            st.error("❌ Faltan credenciales en los secrets. Verifica que estén correctamente configuradas en [api42].")
-            st.stop()
-        
-        # Obtener token para cargar campus
-        token = get_auth_token(client_id, client_secret)
-        if not token:
-            st.error("❌ Error de autenticación")
-            st.stop()
-            
-        headers = {"Authorization": f"Bearer {token}"}
-        
-        # Obtener debug_mode del estado si existe
-        debug_mode_for_campus = st.session_state.get('debug_mode_campus', False)
-        
-        campus_list = get_campus(headers, debug_mode_for_campus)
-        
-        if not campus_list:
-            st.error("❌ No se pudieron cargar los campus")
-            st.stop()
-            
-        # Crear diccionarios organizados por país
-        campus_by_country = {}
-        for campus in campus_list:
-            country = campus.get("country", "Sin País")
-            if country not in campus_by_country:
-                campus_by_country[country] = []
-            campus_by_country[country].append(campus)
         
         # Filtros de ubicación
         st.markdown("## 🌍 Selección de Campus")
@@ -153,47 +153,6 @@ def render_sidebar():
         refresh_button = st.button("🔍 Ver usuarios activos", type="primary", use_container_width=True)
         
         st.markdown("---")
-        
-        # Configuración avanzada
-        st.markdown("## ⚙️ Opciones Avanzadas")
-        days_back = st.slider("Días hacia atrás", 1, 30, DEFAULT_DAYS_BACK)
-        max_users = st.slider("Máximo de usuarios", 20, 500, DEFAULT_MAX_USERS)
-        show_raw_data = st.checkbox("Mostrar datos raw")
-        show_charts = st.checkbox("Mostrar gráficos", value=True)
-        debug_mode = st.checkbox("Modo debug", value=False)
-        
-        # Debug específico para campus
-        debug_mode_campus = st.checkbox("Debug campus", value=False, help="Muestra información detallada sobre la carga de campus")
-        st.session_state.debug_mode_campus = debug_mode_campus
-        
-        # Nueva opción para método de búsqueda
-        search_method = st.selectbox(
-            "Método de búsqueda",
-            SEARCH_METHODS,
-            help="Híbrido: combina ambos métodos para mejores resultados"
-        )
-        
-        # Botón para recargar campus
-        if st.button("🔄 Recargar Campus", help="Fuerza la recarga de la lista de campus"):
-            st.cache_data.clear()
-            st.rerun()
-        
-        st.markdown("---")
-        
-        # Estadísticas globales
-        st.markdown("## 📊 Estadísticas Globales")
-        total_campus = len(campus_list)
-        total_countries = len(campus_by_country)
-        st.metric("🌍 Total Países", total_countries)
-        st.metric("🏫 Total Campus", total_campus)
-        
-        # Top 5 países con más campus
-        country_counts = {country: len(campuses) for country, campuses in campus_by_country.items()}
-        top_countries = sorted(country_counts.items(), key=lambda x: x[1], reverse=True)[:5]
-        
-        st.markdown("**🏆 Top 5 Países:**")
-        for country, count in top_countries:
-            st.markdown(f"- {country}: {count} campus")
         
         # Información adicional sobre el país/campus
         if selected_country != "Todos":
