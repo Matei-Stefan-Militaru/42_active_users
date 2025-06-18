@@ -56,6 +56,22 @@ MAIN_CSS = """
     .block-container {
         padding-top: 0.5rem !important;   /* Qué tan arriba está el contenido principal */
         margin-top: 0rem !important;
+        padding-bottom: 2rem !important;  /* Espacio abajo para evitar corte */
+        min-height: 100vh !important;     /* Altura mínima completa */
+    }
+    
+    /* Asegurar que el contenido principal sea visible */
+    .main .block-container {
+        overflow: visible !important;
+        height: auto !important;
+        max-height: none !important;
+    }
+    
+    /* Arreglar cualquier problema de altura */
+    .stApp {
+        overflow-y: auto !important;
+        height: auto !important;
+        min-height: 100vh !important;
     }
     
     /* ========== SIDEBAR - Elementos más pequeños ========== */
@@ -186,18 +202,17 @@ MAIN_CSS = """
         padding: 1rem 1.5rem;              /* Tu modificación personalizada */
     }
     
-    /* Cambiar altura del elemento específico */
+    /* COMENTADO: Esto podría estar causando el problema de altura */
+    /*
     .st-emotion-cache-1r4qj8v {
-        height: 500px !important;          /* Cambia 500px por la altura que quieras */
-        /* O también puedes usar: */
-        /* min-height: 300px !important; */
-        /* max-height: 800px !important; */
+        height: 500px !important;          
     }
+    */
     
     /* Si quieres que sea más genérico y funcione siempre, usa esto en su lugar: */
     /*
     [class*="st-emotion-cache"] {
-        padding: 1rem 1.5rem !important;   /* Aplica a todas las clases similares */
+        padding: 1rem 1.5rem !important;   
     }
     */
     
