@@ -135,7 +135,8 @@ try:
                                 "Nombre": user.get("displayname", user.get("first_name", "") + " " + user.get("last_name", "")).strip(),
                                 "Correo": user.get("email", "N/A"),
                                 "Última conexión": last_activity,
-                                "Estado": "🟢 En campus" if user.get("location_active", False) else "🔵 Activo recientemente",
+                                "Estado": "🟢 En campus" if user.get("location_active", False) or user.get("location") else "🔵 Activo recientemente",
+                                "Ubicación": user.get("location", "N/A"),  # Agregar ubicación física
                                 "Nivel": 0.0,
                                 "Campus": "N/A",
                                 "Wallet": user.get("wallet", 0),
