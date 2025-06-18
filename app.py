@@ -415,6 +415,23 @@ def get_active_users(campus_id, headers, days_back=1, max_users=100, search_meth
 
 # Configuración en sidebar
 with st.sidebar:
+    # Menú de navegación principal
+    st.markdown("## 🚀 42 Network Apps")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("🎫 Tickets", use_container_width=True, help="Gestión de tickets de la red 42"):
+            st.switch_page("https://42activeusers-tickets.streamlit.app/")
+        
+        if st.button("🏆 Ranking Países", use_container_width=True, help="Ranking de países (próximamente)", disabled=True):
+            st.info("🚧 Próximamente disponible")
+    
+    with col2:
+        if st.button("📊 42Stats", use_container_width=True, help="Estadísticas generales de 42"):
+            st.switch_page("https://42stats.streamlit.app/")
+    
+    st.markdown("---")
+    
     st.markdown("## ⚙️ Configuración")
     
     with st.expander("🔐 Configurar Credenciales"):
@@ -516,12 +533,21 @@ client_secret = "TU_CLIENT_SECRET"
         show_charts = st.checkbox("Mostrar gráficos", value=True)
         debug_mode = st.checkbox("Modo debug", value=False)
         
+        # Debug específico para campus
+        debug_mode_campus = st.checkbox("Debug campus", value=False, help="Muestra información detallada sobre la carga de campus")
+        st.session_state.debug_mode_campus = debug_mode_campus
+        
         # Nueva opción para método de búsqueda
         search_method = st.selectbox(
             "Método de búsqueda",
             ["Híbrido", "Solo actividad reciente", "Solo ubicaciones activas"],
             help="Híbrido: combina ambos métodos para mejores resultados"
         )
+        
+        # Botón para recargar campus
+        if st.button("🔄 Recargar Campus", help="Fuerza la recarga de la lista de campus"):
+            st.cache_data.clear()
+            st.rerun()
     
     # Información adicional sobre el país/campus
     if selected_country != "Todos":
