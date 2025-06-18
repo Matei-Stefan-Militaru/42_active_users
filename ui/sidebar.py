@@ -111,10 +111,16 @@ def render_sidebar():
         
         # Filtro por país
         countries = sorted(campus_by_country.keys())
+        
+        # Establecer Spain como país por defecto
+        spain_index = 0
+        if "Spain" in countries:
+            spain_index = countries.index("Spain") + 1  # +1 porque "Todos" está en índice 0
+        
         selected_country = st.selectbox(
             "🌎 País",
             ["Todos"] + countries,
-            index=0
+            index=spain_index
         )
         
         # Filtro por campus basado en el país seleccionado
@@ -125,10 +131,16 @@ def render_sidebar():
         
         campus_dict = {campus["name"]: campus["id"] for campus in available_campus}
         
+        # Establecer Barcelona como campus por defecto
+        barcelona_index = 0
+        campus_names = list(campus_dict.keys())
+        if "Barcelona" in campus_names:
+            barcelona_index = campus_names.index("Barcelona")
+        
         selected_campus = st.selectbox(
             "🏫 Campus",
-            list(campus_dict.keys()),
-            index=0 if campus_dict else 0
+            campus_names,
+            index=barcelona_index if campus_names else 0
         )
         
         # Mostrar información del campus seleccionado
