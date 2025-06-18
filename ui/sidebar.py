@@ -31,6 +31,47 @@ def render_sidebar():
         
         st.markdown("---")
         
+        # Configuración avanzada
+        with st.expander("⚙️ Opciones Avanzadas"):
+            days_back = st.slider("Días hacia atrás", 1, 30, DEFAULT_DAYS_BACK)
+            max_users = st.slider("Máximo de usuarios", 20, 500, DEFAULT_MAX_USERS)
+            show_raw_data = st.checkbox("Mostrar datos raw")
+            show_charts = st.checkbox("Mostrar gráficos", value=True)
+            debug_mode = st.checkbox("Modo debug", value=False)
+            
+            # Debug específico para campus
+            debug_mode_campus = st.checkbox("Debug campus", value=False, help="Muestra información detallada sobre la carga de campus")
+            st.session_state.debug_mode_campus = debug_mode_campus
+            
+            # Nueva opción para método de búsqueda
+            search_method = st.selectbox(
+                "Método de búsqueda",
+                SEARCH_METHODS,
+                help="Híbrido: combina ambos métodos para mejores resultados"
+            )
+            
+            # Botón para recargar campus
+            if st.button("🔄 Recargar Campus", help="Fuerza la recarga de la lista de campus"):
+                st.cache_data.clear()
+                st.rerun()
+        
+        # Estadísticas globales
+        with st.expander("📊 Estadísticas Globales"):
+            total_campus = len(campus_list)
+            total_countries = len(campus_by_country)
+            st.metric("🌍 Total Países", total_countries)
+            st.metric("🏫 Total Campus", total_campus)
+            
+            # Top 5 países con más campus
+            country_counts = {country: len(campuses) for country, campuses in campus_by_country.items()}
+            top_countries = sorted(country_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+            
+            st.markdown("**🏆 Top 5 Países:**")
+            for country, count in top_countries:
+                st.markdown(f"- {country}: {count} campus")
+        
+        st.markdown("---")
+        
         # Obtener credenciales
         credentials = st.secrets.get("api42", {})
         client_id = credentials.get("client_id")
