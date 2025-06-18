@@ -516,6 +516,11 @@ client_secret = "TU_CLIENT_SECRET"
                     if selected_campus_data.get('city'):
                         st.markdown(f"**🏙️ Ciudad:** {selected_campus_data.get('city')}")
                     st.markdown('<div class="status-success">✅ Conectado</div>', unsafe_allow_html=True)
+                    # 🔄 Nueva parte: cargar usuarios activos automáticamente
+                    with st.spinner("Cargando usuarios activos..."):
+                        df = obtener_usuarios_activos(selected_campus)
+                        st.success("Usuarios activos obtenidos")
+                        st.dataframe(df)  # si querés mostrarlo directamente
         else:
             st.error("❌ No se pudieron cargar los campus")
             st.stop()
