@@ -545,10 +545,10 @@ def get_active_users(campus_id, headers, days_back=1, max_users=100, search_meth
     finally:
         progress_bar.empty()
         status_text.empty()
-            for user in activity_users:
-                user_id = user.get('id')
-                if user_id and user_id not in all_users:
-                    all_users[user_id] = user
+        for user in activity_users:
+            user_id = user.get('id')
+            if user_id and user_id not in all_users:
+                all_users[user_id] = user
             
             progress_bar.progress(0.7)
             status_text.text(f"✅ Usuarios con actividad reciente: {len(activity_users)}")
