@@ -545,10 +545,10 @@ def get_active_users(campus_id, headers, days_back=1, max_users=100, search_meth
     finally:
         progress_bar.empty()
         status_text.empty()
-        for user in activity_users:
-            user_id = user.get('id')
-            if user_id and user_id not in all_users:
-                all_users[user_id] = user
+            for user in activity_users:
+                user_id = user.get('id')
+                if user_id and user_id not in all_users:
+                    all_users[user_id] = user
             
             progress_bar.progress(0.7)
             status_text.text(f"✅ Usuarios con actividad reciente: {len(activity_users)}")
@@ -865,19 +865,40 @@ if 'users_data' in st.session_state and not st.session_state.users_data.empty:
             # Top usuarios por nivel
             if len(df) > 0:
                 st.markdown("### 🏆 Top 10 Usuarios por Nivel")
-                columns_to_show = ['Login', 'Nombre', 'Nivel']
+                
+                # Asegurar que tenemos las columnas necesarias
+                base_columns = ['Login', 'Nombre', 'Nivel']
+                available_columns = [col for col in base_columns if col in df.columns]
+                
                 if 'Wallet' in df.columns:
-                    columns_to_show.append('Wallet')
+                    available_columns.append('Wallet')
                 
-                top_users = df.nlargest(10, 'Nivel')[columns_to_show]
+                # Obtener top usuarios (máximo 10 o los que haya)
+                num_users = min(10, len(df))
+                top_users = df.nlargest(num_users, 'Nivel')[available_columns]
                 
-                # Formatear la tabla
-                display_top = top_users.copy()
-                display_top['Nivel'] = display_top['Nivel'].apply(lambda x: f"{x:.1f}")
-                if 'Wallet' in display_top.columns:
-                    display_top['Wallet'] = display_top['Wallet'].apply(lambda x: f"{x:.0f}")
-                
-                st.dataframe(display_top, use_container_width=True, hide_index=True)
+                if not top_users.empty:
+                    # Formatear la tabla
+                    display_top = top_users.copy()
+                    display_top['Nivel'] = display_top['Nivel'].apply(lambda x: f"{x:.1f}")
+                    
+                    if 'Wallet' in display_top.columns:
+                        display_top['Wallet'] = display_top['Wallet'].apply(lambda x: f"{x:.0f}")
+                    
+                    # Limitar el ancho de las columnas de texto
+                    if 'Nombre' in display_top.columns:
+                        display_top['Nombre'] = display_top['Nombre'].apply(
+                            lambda x: x[:20] + "..." if len(str(x)) > 20 else str(x)
+                        )
+                    
+                    st.dataframe(
+                        display_top, 
+                        use_container_width=True, 
+                        hide_index=True,
+                        height=min(350, (len(display_top) + 1) * 35)  # Altura dinámica
+                    )
+                else:
+                    st.info("No hay usuarios con niveles para mostrar")
     
     # Tabla principal con filtros mejorados
     st.markdown("## 👥 Lista de Usuarios Activos")
