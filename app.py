@@ -177,7 +177,7 @@ def get_active_users(campus_id, headers, days_back=1, max_users=100):
     # Método 2: Buscar usuarios con actividad reciente
     status_text.text("🔍 Buscando usuarios con actividad reciente...")
     page = 1
-    now = datetime.utcnow()
+    now = datetime.now(datetime.UTC)  # Fixed deprecated datetime.utcnow()
     past_date = now - timedelta(days=days_back)
     date_filter = past_date.strftime("%Y-%m-%dT%H:%M:%SZ")
     
@@ -348,7 +348,7 @@ if refresh_button or (auto_refresh and 'users_data' not in st.session_state):
                         "Estado": "🟢 En campus" if user.get("location_active", False) else "🔵 Activo recientemente",
                         "Nivel": 0.0,
                         "Campus": "N/A",
-                        "Wallet": user.get("wallet", 0),
+                        "Wallet": user.get("wallet", 0),  # This might be None or missing
                         "Evaluation Points": user.get("correction_point", 0)
                     }
                     
@@ -395,6 +395,11 @@ if refresh_button or (auto_refresh and 'users_data' not in st.session_state):
                 
                 # Ordenar por última conexión
                 df = df.sort_values("Última conexión", ascending=False)
+                
+                # Ensure numeric columns are properly handled
+                df['Wallet'] = pd.to_numeric(df['Wallet'], errors='coerce').fillna(0)
+                df['Evaluation Points'] = pd.to_numeric(df['Evaluation Points'], errors='coerce').fillna(0)
+                df['Nivel'] = pd.to_numeric(df['Nivel'], errors='coerce').fillna(0.0)
             
             # Guardar en session state
             st.session_state.users_data = df
@@ -443,8 +448,12 @@ if 'users_data' in st.session_state and not st.session_state.users_data.empty:
         st.metric("🏆 Nivel Máximo", f"{max_level:.1f}")
     
     with col3:
-        avg_wallet = df['Wallet'].mean()
-        st.metric("💰 Wallet Promedio", f"{avg_wallet:.0f}")
+        # Fixed: Check if Wallet column exists and has valid data
+        if 'Wallet' in df.columns and not df['Wallet'].isna().all():
+            avg_wallet = df['Wallet'].mean()
+            st.metric("💰 Wallet Promedio", f"{avg_wallet:.0f}")
+        else:
+            st.metric("💰 Wallet Promedio", "N/A")
     
     # Información temporal
     if not df.empty:
@@ -501,12 +510,18 @@ if 'users_data' in st.session_state and not st.session_state.users_data.empty:
             # Top usuarios por nivel
             if len(df) > 0:
                 st.markdown("### 🏆 Top 10 Usuarios por Nivel")
-                top_users = df.nlargest(10, 'Nivel')[['Login', 'Nombre', 'Nivel', 'Wallet']]
+                # Select columns that exist in the dataframe
+                columns_to_show = ['Login', 'Nombre', 'Nivel']
+                if 'Wallet' in df.columns:
+                    columns_to_show.append('Wallet')
+                
+                top_users = df.nlargest(10, 'Nivel')[columns_to_show]
                 
                 # Formatear la tabla
                 display_top = top_users.copy()
                 display_top['Nivel'] = display_top['Nivel'].apply(lambda x: f"{x:.1f}")
-                display_top['Wallet'] = display_top['Wallet'].apply(lambda x: f"{x:.0f}")
+                if 'Wallet' in display_top.columns:
+                    display_top['Wallet'] = display_top['Wallet'].apply(lambda x: f"{x:.0f}")
                 
                 st.dataframe(display_top, use_container_width=True, hide_index=True)
     
@@ -536,8 +551,16 @@ if 'users_data' in st.session_state and not st.session_state.users_data.empty:
     if status_filter != "Todos":
         filtered_df = filtered_df[filtered_df['Estado'] == status_filter]
     
-    # Formatear para mostrar
-    display_columns = ['Login', 'Nombre', 'Estado', 'Nivel', 'Wallet', 'Evaluation Points', 'Última conexión']
+    # Formatear para mostrar - only include columns that exist
+    base_columns = ['Login', 'Nombre', 'Estado', 'Nivel', 'Última conexión']
+    display_columns = base_columns.copy()
+    
+    # Add optional columns if they exist
+    if 'Wallet' in filtered_df.columns:
+        display_columns.insert(-1, 'Wallet')  # Insert before 'Última conexión'
+    if 'Evaluation Points' in filtered_df.columns:
+        display_columns.insert(-1, 'Evaluation Points')
+    
     display_df = filtered_df[display_columns].copy()
     
     # Formatear fechas de manera segura
@@ -554,7 +577,12 @@ if 'users_data' in st.session_state and not st.session_state.users_data.empty:
     
     display_df['Última conexión'] = display_df['Última conexión'].apply(safe_format_date)
     display_df['Nivel'] = display_df['Nivel'].apply(lambda x: f"{x:.1f}")
-    display_df['Wallet'] = display_df['Wallet'].apply(lambda x: f"{x:.0f}")
+    
+    # Format optional columns if they exist
+    if 'Wallet' in display_df.columns:
+        display_df['Wallet'] = display_df['Wallet'].apply(lambda x: f"{x:.0f}")
+    if 'Evaluation Points' in display_df.columns:
+        display_df['Evaluation Points'] = display_df['Evaluation Points'].apply(lambda x: f"{x:.0f}")
     
     st.dataframe(
         display_df,
