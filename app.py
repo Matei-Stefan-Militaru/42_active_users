@@ -67,9 +67,36 @@ if not selected_campus or not campus_id:
     st.error("❌ Selecciona un campus válido en la barra lateral")
     st.stop()
 
-# Trigger para cargar datos
-if refresh_button or (auto_refresh and 'users_data' not in st.session_state):
-    with st.spinner(f"🔍 Cargando usuarios activos de {selected_campus}..."):
+# Detectar cambios en la configuración para auto-cargar
+config_changed = False
+current_config = {
+    'campus_id': campus_id,
+    'days_back': days_back,
+    'search_method': search_method,
+    'max_users': max_users
+}
+
+# Verificar si la configuración ha cambiado
+if 'last_config' not in st.session_state:
+    st.session_state.last_config = current_config
+    config_changed = True
+else:
+    if st.session_state.last_config != current_config:
+        config_changed = True
+        st.session_state.last_config = current_config
+
+# Trigger para cargar datos (manual o automático por cambio de configuración)
+should_load_data = (
+    refresh_button or 
+    (auto_refresh and 'users_data' not in st.session_state) or
+    (config_changed and auto_load)
+)
+    # Mostrar indicador de carga automática si es por cambio de configuración
+    loading_message = f"🔍 Cargando usuarios activos de {selected_campus}..."
+    if config_changed and not refresh_button:
+        loading_message = f"🔄 Auto-cargando datos para {selected_campus}..."
+    
+    with st.spinner(loading_message):
         try:
             users = get_active_users(campus_id, headers, days_back, max_users, search_method, debug_mode)
             
