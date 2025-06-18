@@ -421,14 +421,30 @@ with st.sidebar:
     col1, col2 = st.columns(2)
     with col1:
         if st.button("🎫 Tickets", use_container_width=True, help="Gestión de tickets de la red 42"):
-            st.switch_page("https://42activeusers-tickets.streamlit.app/")
+            st.markdown(
+                '<meta http-equiv="refresh" content="0; url=https://42activeusers-tickets.streamlit.app/" target="_blank">',
+                unsafe_allow_html=True
+            )
+            st.success("🎫 Redirigiendo a Tickets...")
         
         if st.button("🏆 Ranking Países", use_container_width=True, help="Ranking de países (próximamente)", disabled=True):
             st.info("🚧 Próximamente disponible")
     
     with col2:
         if st.button("📊 42Stats", use_container_width=True, help="Estadísticas generales de 42"):
-            st.switch_page("https://42stats.streamlit.app/")
+            st.markdown(
+                '<meta http-equiv="refresh" content="0; url=https://42stats.streamlit.app/" target="_blank">',
+                unsafe_allow_html=True
+            )
+            st.success("📊 Redirigiendo a 42Stats...")
+    
+    # Enlaces alternativos usando markdown
+    st.markdown("### 🔗 Enlaces Rápidos")
+    st.markdown("""
+    - 🎫 [Tickets](https://42activeusers-tickets.streamlit.app/)
+    - 📊 [42Stats](https://42stats.streamlit.app/)
+    - 🏆 Ranking Países *(próximamente)*
+    """)
     
     st.markdown("---")
     
