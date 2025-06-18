@@ -50,15 +50,6 @@ st.markdown("""
 
 st.markdown('<h1 class="main-header">🚀 42 Network - Usuarios Activos</h1>', unsafe_allow_html=True)
 
-# Obtener credenciales
-credentials = st.secrets.get("api42", {})
-client_id = credentials.get("client_id")
-client_secret = credentials.get("client_secret")
-
-if not client_id or not client_secret:
-    st.error("❌ Faltan credenciales en los secrets. Verifica que estén correctamente configuradas en [api42].")
-    st.stop()
-
 # Función de autenticación
 @st.cache_data(ttl=3500)
 def get_auth_token(client_id, client_secret):
@@ -387,6 +378,15 @@ client_secret = "TU_CLIENT_SECRET"
         """, language="toml")
     
     st.markdown("---")
+    
+    # Obtener credenciales
+    credentials = st.secrets.get("api42", {})
+    client_id = credentials.get("client_id")
+    client_secret = credentials.get("client_secret")
+
+    if not client_id or not client_secret:
+        st.error("❌ Faltan credenciales en los secrets. Verifica que estén correctamente configuradas en [api42].")
+        st.stop()
     
     # Obtener token para cargar campus
     token = get_auth_token(client_id, client_secret)
