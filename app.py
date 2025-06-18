@@ -3,7 +3,7 @@ import requests
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import time
 import json
 
@@ -177,7 +177,9 @@ def get_active_users(campus_id, headers, days_back=1, max_users=100):
     # Método 2: Buscar usuarios con actividad reciente
     status_text.text("🔍 Buscando usuarios con actividad reciente...")
     page = 1
-    now = datetime.now(datetime.UTC)  # Fixed deprecated datetime.utcnow()
+    
+    # Fixed datetime handling - use timezone.utc instead of datetime.UTC
+    now = datetime.now(timezone.utc)
     past_date = now - timedelta(days=days_back)
     date_filter = past_date.strftime("%Y-%m-%dT%H:%M:%SZ")
     
@@ -348,7 +350,7 @@ if refresh_button or (auto_refresh and 'users_data' not in st.session_state):
                         "Estado": "🟢 En campus" if user.get("location_active", False) else "🔵 Activo recientemente",
                         "Nivel": 0.0,
                         "Campus": "N/A",
-                        "Wallet": user.get("wallet", 0),  # This might be None or missing
+                        "Wallet": user.get("wallet", 0),
                         "Evaluation Points": user.get("correction_point", 0)
                     }
                     
@@ -631,7 +633,7 @@ st.markdown("---")
 campus_name = st.session_state.get('selected_campus', 'Ninguno')
 days = st.session_state.get('days_back', days_back)
 st.markdown(
-    f"💡 **42 Network Dashboard v2.0** | "
+    f"💡 **42 Network Dashboard v2.1** | "
     f"Campus: {campus_name} | "
     f"Período: {days} día(s) | "
     f"🔄 Auto-actualizar: {'✅' if auto_refresh else '❌'} | "
