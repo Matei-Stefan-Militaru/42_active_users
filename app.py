@@ -50,6 +50,52 @@ st.markdown("""
 
 st.markdown('<h1 class="main-header">🚀 42 Network - Usuarios Activos</h1>', unsafe_allow_html=True)
 
+# Obtener credenciales
+credentials = st.secrets.get("api42", {})
+client_id = credentials.get("client_id")
+client_secret = credentials.get("client_secret")
+
+if not client_id or not client_secret:
+    st.error("❌ Faltan credenciales en los secrets. Verifica que estén correctamente configuradas en [api42].")
+    st.stop()
+
+# Función de autenticación
+@st.cache_data(ttl=3500)
+def get_auth_token(client_id, client_secret):
+    """Obtener token de acceso"""
+    auth_url = "https://api.intra.42.fr/oauth/token"
+    data = {
+        "grant_type": "client_credentials",
+        "client_id": client_id,
+        "client_secret": client_secret,
+    }
+    
+    try:
+        response = requests.post(auth_url, data=data, timeout=10)
+        if response.status_code == 200:
+            return response.json().get("access_token")
+        else:
+            st.error(f"❌ Error de autenticación: {response.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"❌ Error de conexión: {str(e)}")
+        return None
+
+# Función para obtener campus
+@st.cache_data(ttl=3600)
+def get_campus(headers):
+    """Obtener lista de campus"""
+    try:
+        res = requests.get("https://api.intra.42.fr/v2/campus", headers=headers, timeout=10)
+        if res.status_code == 200:
+            return res.json()
+        else:
+            st.error(f"❌ Error al obtener campus: {res.status_code}")
+            return []
+    except Exception as e:
+        st.error(f"❌ Error: {str(e)}")
+        return []
+
 # Configuración en sidebar
 with st.sidebar:
     st.markdown("## ⚙️ Configuración")
@@ -232,8 +278,7 @@ def get_user_details(user_id, headers):
         else:
             return None
     except Exception as e:
-        if debug_mode:
-            st.warning(f"Error obteniendo detalles de usuario {user_id}: {str(e)}")
+        # Solo mostrar en debug mode si está disponible
         return None
 
 def handle_rate_limit(response, status_text, debug_mode=False):
@@ -429,7 +474,7 @@ def get_users_by_locations(campus_id, headers, status_text, debug_mode=False):
     return users
 
 # Función principal mejorada para obtener usuarios activos
-def get_active_users(campus_id, headers, days_back=1, max_users=100, search_method="Híbrido"):
+def get_active_users(campus_id, headers, days_back=1, max_users=100, search_method="Híbrido", debug_mode=False):
     """Obtener usuarios activos usando múltiples enfoques mejorados"""
     all_users = {}
     progress_bar = st.progress(0)
@@ -500,6 +545,51 @@ def get_active_users(campus_id, headers, days_back=1, max_users=100, search_meth
     finally:
         progress_bar.empty()
         status_text.empty()
+            for user in activity_users:
+                user_id = user.get('id')
+                if user_id and user_id not in all_users:
+                    all_users[user_id] = user
+            
+            progress_bar.progress(0.7)
+            status_text.text(f"✅ Usuarios con actividad reciente: {len(activity_users)}")
+        
+        final_users = list(all_users.values())[:max_users]
+        
+        # Obtener datos completos para usuarios seleccionados
+        progress_bar.progress(0.8)
+        status_text.text("🔍 Obteniendo datos completos de usuarios...")
+        
+        enhanced_users = []
+        detail_limit = min(50, len(final_users))  # Límite para evitar sobrecarga
+        
+        for i, user in enumerate(final_users):
+            if i < detail_limit:
+                detailed_user = get_user_details(user.get('id'), headers)
+                if detailed_user:
+                    # Preservar información de ubicación si existe
+                    if user.get('location_active'):
+                        detailed_user['location_active'] = True
+                        detailed_user['last_location'] = user.get('last_location')
+                    enhanced_users.append(detailed_user)
+                else:
+                    enhanced_users.append(user)
+            else:
+                enhanced_users.append(user)
+            
+            # Actualizar progreso
+            if i % 10 == 0:
+                progress = 0.8 + (i / len(final_users)) * 0.2
+                progress_bar.progress(min(progress, 1.0))
+        
+        progress_bar.progress(1.0)
+        status_text.text(f"✅ Completado: {len(enhanced_users)} usuarios procesados")
+        time.sleep(1)  # Mostrar el mensaje final brevemente
+        
+        return enhanced_users
+        
+    finally:
+        progress_bar.empty()
+        status_text.empty()
 
 # Auto-refresh logic
 if auto_refresh:
@@ -518,7 +608,7 @@ if not selected_campus or not campus_id:
 # Trigger para cargar datos
 if refresh_button or (auto_refresh and 'users_data' not in st.session_state):
     with st.spinner(f"🔍 Cargando usuarios activos de {selected_campus}..."):
-        users = get_active_users(campus_id, headers, days_back, max_users, search_method)
+        users = get_active_users(campus_id, headers, days_back, max_users, search_method, debug_mode)
         
         if not users:
             st.info(f"📝 No se encontraron usuarios activos en {selected_campus} en los últimos {days_back} día(s).")
@@ -589,10 +679,10 @@ if refresh_button or (auto_refresh and 'users_data' not in st.session_state):
                     
                     df_data.append(user_info)
                     
-                except Exception as e:
-                    if debug_mode:
-                        st.warning(f"⚠️ Error procesando usuario {user.get('login', 'unknown')}: {str(e)}")
-                    continue
+                    except Exception as e:
+                        if debug_mode:
+                            st.warning(f"⚠️ Error procesando usuario {user.get('login', 'unknown')}: {str(e)}")
+                        continue
             
             df = pd.DataFrame(df_data)
             
@@ -698,7 +788,8 @@ if 'users_data' in st.session_state and not st.session_state.users_data.empty:
         fecha_min = df['Última conexión'].min().strftime("%d/%m/%Y %H:%M")
         fecha_max = df['Última conexión'].max().strftime("%d/%m/%Y %H:%M")
         search_method_used = st.session_state.get('search_method', 'N/A')
-        st.info(f"📅 **Período de actividad:** {fecha_min} → {fecha_max} | **Campus:** {st.session_state.get('selected_campus', 'N/A')} | **Método:** {search_method_used}")
+        country_info = f" | **País:** {selected_country}" if selected_country != "Todos" else ""
+        st.info(f"📅 **Período de actividad:** {fecha_min} → {fecha_max} | **Campus:** {st.session_state.get('selected_campus', 'N/A')}{country_info} | **Método:** {search_method_used}")
     
     # Gráficos (si están habilitados)
     if show_charts and len(df) > 0:
@@ -867,6 +958,7 @@ if 'users_data' in st.session_state and not st.session_state.users_data.empty:
             st.json({
                 "campus_id": campus_id,
                 "selected_campus": selected_campus,
+                "selected_country": selected_country,
                 "days_back": st.session_state.get('days_back', days_back),
                 "max_users": max_users,
                 "search_method": st.session_state.get('search_method', search_method),
@@ -907,12 +999,11 @@ else:
         - 🏆 **Rankings:** Top usuarios por nivel y distribución
         - 💰 **Métricas:** Wallet, puntos de evaluación y más
         
-        **Funcionalidades mejoradas:**
-        - ✅ **Filtrado de fechas corregido:** Ahora respeta correctamente el rango de días seleccionado
-        - ✅ **Múltiples métodos de búsqueda:** Híbrido, solo actividad reciente, solo ubicaciones activas
-        - ✅ **Mejor manejo de fechas:** Parseo robusto de timestamps de la API
-        - ✅ **Modo debug mejorado:** Información detallada sobre el proceso de búsqueda
-        - ✅ **Filtros de fecha manuales:** Verificación adicional por si la API no filtra correctamente
+        **Filtros mejorados:**
+        - 🌍 **Filtro por país:** Selecciona el país para ver sus campus
+        - 🏫 **Filtro por campus:** Elige el campus específico a analizar
+        - 📊 **Estadísticas globales:** Ve información de todos los países y campus
+        - ✅ **Información del campus:** Detalles del campus seleccionado
         
         **Métodos de búsqueda:**
         - **Híbrido:** Combina usuarios en campus + actividad reciente (recomendado)
@@ -937,8 +1028,10 @@ st.markdown("---")
 campus_name = st.session_state.get('selected_campus', 'Ninguno')
 days = st.session_state.get('days_back', days_back)
 method = st.session_state.get('search_method', search_method)
+country_name = selected_country if 'selected_country' in locals() else 'N/A'
 st.markdown(
-    f"💡 **42 Network Dashboard v2.2** | "
+    f"💡 **42 Network Dashboard v2.3** | "
+    f"País: {country_name} | "
     f"Campus: {campus_name} | "
     f"Período: {days} día(s) | "
     f"Método: {method} | "
