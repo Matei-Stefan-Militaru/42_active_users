@@ -67,7 +67,6 @@ def render_sidebar():
         
         # Configuración avanzada
         with st.expander("⚙️ Opciones Avanzadas"):
-            days_back = st.slider("Días hacia atrás", 1, 30, DEFAULT_DAYS_BACK)
             max_users = st.slider("Máximo de usuarios", 20, 500, DEFAULT_MAX_USERS)
             show_raw_data = st.checkbox("Mostrar datos raw")
             show_charts = st.checkbox("Mostrar gráficos", value=True)
@@ -77,17 +76,17 @@ def render_sidebar():
             debug_mode_campus = st.checkbox("Debug campus", value=False, help="Muestra información detallada sobre la carga de campus")
             st.session_state.debug_mode_campus = debug_mode_campus
             
-            # Nueva opción para método de búsqueda
-            search_method = st.selectbox(
-                "Método de búsqueda",
-                SEARCH_METHODS,
-                help="Híbrido: combina ambos métodos para mejores resultados"
-            )
+            # Método de búsqueda fijo en "Solo ubicaciones activas"
+            search_method = "Solo ubicaciones activas"
+            st.info("🔍 **Modo:** Solo usuarios actualmente en el campus")
             
             # Botón para recargar campus
             if st.button("🔄 Recargar Campus", help="Fuerza la recarga de la lista de campus"):
                 st.cache_data.clear()
                 st.rerun()
+        
+        # Configuración fija para usuarios activos
+        days_back = 1  # Valor fijo, no se muestra al usuario
         
         # Estadísticas globales
         with st.expander("📊 Estadísticas Globales"):
