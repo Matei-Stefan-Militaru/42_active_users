@@ -62,9 +62,75 @@ client_id = "TU_CLIENT_ID"
 client_secret = "TU_CLIENT_SECRET"
         """, language="toml")
     
+    st.markdown("---")
+    
+    # Obtener token para cargar campus
+    token = get_auth_token(client_id, client_secret)
+    if token:
+        headers = {"Authorization": f"Bearer {token}"}
+        campus_list = get_campus(headers)
+        
+        if campus_list:
+            # Crear diccionarios organizados por país
+            campus_by_country = {}
+            for campus in campus_list:
+                country = campus.get("country", "Sin País")
+                if country not in campus_by_country:
+                    campus_by_country[country] = []
+                campus_by_country[country].append(campus)
+            
+            # Filtros de ubicación
+            st.markdown("## 🌍 Selección de Campus")
+            
+            # Filtro por país
+            countries = sorted(campus_by_country.keys())
+            selected_country = st.selectbox(
+                "🌎 País",
+                ["Todos"] + countries,
+                index=0
+            )
+            
+            # Filtro por campus basado en el país seleccionado
+            if selected_country == "Todos":
+                available_campus = campus_list
+            else:
+                available_campus = campus_by_country[selected_country]
+            
+            campus_dict = {campus["name"]: campus["id"] for campus in available_campus}
+            
+            selected_campus = st.selectbox(
+                "🏫 Campus",
+                list(campus_dict.keys()),
+                index=0 if campus_dict else 0
+            )
+            
+            # Mostrar información del campus seleccionado
+            if selected_campus:
+                campus_id = campus_dict[selected_campus]
+                selected_campus_data = next((c for c in available_campus if c["name"] == selected_campus), None)
+                
+                if selected_campus_data:
+                    st.markdown("### 📍 Campus Seleccionado")
+                    st.markdown(f"**🏫 Nombre:** {selected_campus}")
+                    st.markdown(f"**🌎 País:** {selected_campus_data.get('country', 'N/A')}")
+                    st.markdown(f"**🆔 ID:** {campus_id}")
+                    if selected_campus_data.get('city'):
+                        st.markdown(f"**🏙️ Ciudad:** {selected_campus_data.get('city')}")
+                    st.markdown('<div class="status-success">✅ Conectado</div>', unsafe_allow_html=True)
+        else:
+            st.error("❌ No se pudieron cargar los campus")
+            st.stop()
+    else:
+        st.error("❌ Error de autenticación")
+        st.stop()
+    
+    st.markdown("---")
+    
     # Auto-refresh
     auto_refresh = st.checkbox("🔄 Auto-actualizar (60s)", value=False)
     refresh_button = st.button("🔍 Ver usuarios activos", type="primary", use_container_width=True)
+    
+    st.markdown("---")
     
     # Configuración avanzada
     with st.expander("⚙️ Opciones Avanzadas"):
@@ -80,6 +146,34 @@ client_secret = "TU_CLIENT_SECRET"
             ["Híbrido", "Solo actividad reciente", "Solo ubicaciones activas"],
             help="Híbrido: combina ambos métodos para mejores resultados"
         )
+    
+    # Información adicional sobre el país/campus
+    if selected_country != "Todos":
+        with st.expander(f"🌍 Información de {selected_country}"):
+            country_campus = campus_by_country[selected_country]
+            st.markdown(f"**Total de campus:** {len(country_campus)}")
+            st.markdown("**Campus disponibles:**")
+            for campus in country_campus:
+                emoji = "📍" if campus["name"] == selected_campus else "🏫"
+                st.markdown(f"- {emoji} {campus['name']}")
+                if campus.get('city'):
+                    st.markdown(f"  📍 {campus['city']}")
+    
+    # Estadísticas globales
+    if campus_list:
+        with st.expander("📊 Estadísticas Globales"):
+            total_campus = len(campus_list)
+            total_countries = len(campus_by_country)
+            st.metric("🌍 Total Países", total_countries)
+            st.metric("🏫 Total Campus", total_campus)
+            
+            # Top 5 países con más campus
+            country_counts = {country: len(campuses) for country, campuses in campus_by_country.items()}
+            top_countries = sorted(country_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+            
+            st.markdown("**🏆 Top 5 Países:**")
+            for country, count in top_countries:
+                st.markdown(f"- {country}: {count} campus")
 
 # Obtener credenciales
 credentials = st.secrets.get("api42", {})
@@ -416,34 +510,10 @@ if auto_refresh:
         st.session_state.last_refresh = time.time()
         st.rerun()
 
-# Obtener token
-token = get_auth_token(client_id, client_secret)
-if not token:
+# Verificar que se haya seleccionado un campus válido
+if not selected_campus or not campus_id:
+    st.error("❌ Selecciona un campus válido en la barra lateral")
     st.stop()
-
-headers = {"Authorization": f"Bearer {token}"}
-
-# Obtener campus
-campus_list = get_campus(headers)
-if not campus_list:
-    st.error("❌ No se pudieron cargar los campus")
-    st.stop()
-
-campus_dict = {campus["name"]: campus["id"] for campus in campus_list}
-
-# Selector de campus
-selected_campus = st.selectbox(
-    "🏫 Selecciona un campus",
-    list(campus_dict.keys()),
-    index=0 if campus_dict else 0
-)
-
-if selected_campus:
-    campus_id = campus_dict[selected_campus]
-    
-    # Mostrar información del campus seleccionado
-    st.sidebar.markdown(f"**Campus seleccionado:** {selected_campus} (ID: {campus_id})")
-    st.sidebar.markdown('<div class="status-success">✅ Conectado</div>', unsafe_allow_html=True)
 
 # Trigger para cargar datos
 if refresh_button or (auto_refresh and 'users_data' not in st.session_state):
