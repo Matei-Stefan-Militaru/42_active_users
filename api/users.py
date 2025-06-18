@@ -174,39 +174,54 @@ def get_users_by_activity(campus_id, headers, days_back, max_users, status_text,
     return users[:max_users]
 
 def get_users_by_locations(campus_id, headers, status_text, debug_mode=False):
-    """Obtener usuarios actualmente en el campus usando locations"""
+    """Obtener usuarios actualmente en el campus usando el campo location"""
     users = []
     
     try:
         status_text.text("🔍 Buscando usuarios actualmente en el campus...")
-        locations_url = f"{API_BASE_URL}/v2/campus/{campus_id}/locations?page[size]={DEFAULT_PAGE_SIZE}&filter[active]=true"
         
-        response = requests.get(locations_url, headers=headers, timeout=20)
+        # Obtener usuarios del campus (método directo)
+        campus_users_url = f"{API_BASE_URL}/v2/campus/{campus_id}/users?page[size]={DEFAULT_PAGE_SIZE}"
+        
+        response = requests.get(campus_users_url, headers=headers, timeout=20)
         
         if response.status_code == 200:
-            locations = response.json()
-            if locations:
-                status_text.text(f"✅ Encontradas {len(locations)} ubicaciones activas")
+            campus_users = response.json()
+            if campus_users:
+                status_text.text(f"✅ Encontrados {len(campus_users)} usuarios del campus")
                 
-                for location in locations:
-                    if location.get('user') and location.get('end_at') is None:
-                        user_data = location['user']
-                        user_data['last_location'] = location.get('begin_at')
-                        user_data['location_active'] = True
-                        users.append(user_data)
+                # Filtrar usuarios que tienen location (están físicamente en el campus)
+                active_users = []
+                for user in campus_users:
+                    user_location = user.get('location')
+                    if user_location and user_location != "unavailable" and user_location.strip():
+                        # El usuario está en una ubicación física
+                        user['location_active'] = True
+                        user['last_location'] = user.get('updated_at')  # Usar updated_at como referencia
+                        active_users.append(user)
+                        
+                        if debug_mode:
+                            st.write(f"👤 Usuario activo: {user.get('login', 'N/A')} en {user_location}")
+                
+                users = active_users
                 
                 if debug_mode:
-                    st.success(f"✅ Encontrados {len(users)} usuarios en ubicaciones activas")
+                    st.success(f"✅ Encontrados {len(users)} usuarios activamente en campus de {len(campus_users)} totales")
+                    if users:
+                        locations = [u.get('location', 'N/A') for u in users]
+                        unique_locations = list(set(locations))
+                        st.write(f"📍 Ubicaciones activas: {', '.join(unique_locations[:10])}")  # Mostrar max 10
             else:
                 if debug_mode:
-                    st.info("📭 No hay ubicaciones activas en este momento")
+                    st.info("📭 No se encontraron usuarios en este campus")
         else:
             if debug_mode:
-                st.warning(f"⚠️ Error obteniendo locations: {response.status_code}")
+                st.warning(f"⚠️ Error obteniendo usuarios del campus: {response.status_code}")
+                st.write(f"URL: {campus_users_url}")
                 
     except Exception as e:
         if debug_mode:
-            st.error(f"❌ Error obteniendo locations: {str(e)}")
+            st.error(f"❌ Error obteniendo usuarios del campus: {str(e)}")
     
     return users
 
