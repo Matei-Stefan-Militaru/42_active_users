@@ -48,7 +48,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<h1 class="main-header">🚀 42 Network - Finding Your Evaluator</h1>', unsafe_allow_html=True)
+st.markdown('<h1 class="main-header">🚀 42 Network - Usuarios Activos</h1>', unsafe_allow_html=True)
 
 # Función de autenticación
 @st.cache_data(ttl=3500)
@@ -646,7 +646,7 @@ if refresh_button or (auto_refresh and 'users_data' not in st.session_state):
                         "Nivel": 0.0,
                         "Campus": "N/A",
                         "Wallet": user.get("wallet", 0),
-                        "Evaluation Points": user.get("correction_point", 0)
+                         "Evaluation Points": user.get("correction_point", 0)
                     }
                     
                     # Obtener nivel del cursus de manera más robusta
@@ -1010,11 +1010,11 @@ days = st.session_state.get('days_back', days_back)
 method = st.session_state.get('search_method', search_method)
 country_name = selected_country if 'selected_country' in locals() else 'N/A'
 st.markdown(
-    f"💡 **42 Network - Finding Your Evaluator v2.3** | "
+    f"💡 **42 Network Dashboard v2.3** | "
     f"País: {country_name} | "
     f"Campus: {campus_name} | "
     f"Período: {days} día(s) | "
-    f"Método: {method} | "
+    f"Método: {method} | "Add commentMore actions
     f"🔄 Auto-actualizar: {'✅' if auto_refresh else '❌'} | "
     f"🐛 Debug: {'✅' if debug_mode else '❌'}"
 )
