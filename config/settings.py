@@ -22,8 +22,8 @@ MAIN_CSS = """
         font-size: 2rem;          /* Tamaño del título principal */
         font-weight: bold;
         text-align: center;
-        margin-bottom: 0.5rem;    /* Espacio debajo del header */
-        margin-top: 0rem;         /* Espacio arriba del header */
+        margin-bottom: 5px;    /* Espacio debajo del header */
+        margin-top: 5px;         /* Espacio arriba del header */
     }
     
     /* ========== CAJAS DE ESTADO ========== */
@@ -50,7 +50,7 @@ MAIN_CSS = """
     /* ========== CONFIGURACIÓN GENERAL DE LAYOUT ========== */
     /* Sidebar pegado arriba y compacto */
     .css-1d391kg {
-        padding-top: 0rem !important;     /* Qué tan arriba está el sidebar (0 = pegado) */
+        padding-top: ;     /* Qué tan arriba está el sidebar (0 = pegado) */
         margin-top: 0rem !important;
     }
     /* Contenido principal */
