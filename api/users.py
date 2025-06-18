@@ -210,71 +210,54 @@ def get_users_by_locations(campus_id, headers, status_text, debug_mode=False):
     
     return users
 
-def get_active_users(campus_id, headers, days_back=1, max_users=100, search_method="Híbrido", debug_mode=False):
-    """Obtener usuarios activos usando múltiples enfoques mejorados"""
-    all_users = {}
+def get_active_users(campus_id, headers, days_back=1, max_users=200, search_method="Solo ubicaciones activas", debug_mode=False):
+    """Obtener usuarios activos usando solo ubicaciones activas para máxima velocidad"""
     progress_bar = st.progress(0)
     status_text = st.empty()
     
     try:
-        # Método 1: Usuarios actualmente en el campus (solo si está habilitado)
-        if search_method in ["Híbrido", "Solo ubicaciones activas"]:
-            location_users = get_users_by_locations(campus_id, headers, status_text, debug_mode)
-            
-            for user in location_users:
-                user_id = user.get('id')
-                if user_id:
-                    all_users[user_id] = user
-            
-            progress_bar.progress(0.3)
-            status_text.text(f"✅ Usuarios en campus: {len(location_users)}")
+        # Solo método de ubicaciones activas (más rápido)
+        status_text.text("🔍 Buscando usuarios actualmente en el campus...")
+        progress_bar.progress(0.2)
         
-        # Método 2: Usuarios con actividad reciente (solo si está habilitado)
-        if search_method in ["Híbrido", "Solo actividad reciente"]:
-            activity_users = get_users_by_activity(
-                campus_id, headers, days_back, max_users, 
-                status_text, progress_bar, debug_mode
-            )
-            
-            for user in activity_users:
-                user_id = user.get('id')
-                if user_id and user_id not in all_users:
-                    all_users[user_id] = user
-            
-            progress_bar.progress(0.7)
-            status_text.text(f"✅ Usuarios con actividad reciente: {len(activity_users)}")
+        location_users = get_users_by_locations(campus_id, headers, status_text, debug_mode)
         
-        final_users = list(all_users.values())[:max_users]
+        progress_bar.progress(0.6)
+        status_text.text(f"✅ Encontrados {len(location_users)} usuarios en campus")
         
-        # Obtener datos completos para usuarios seleccionados
+        # Limitar a max_users
+        final_users = location_users[:max_users]
+        
+        # Obtener datos completos para usuarios seleccionados (solo los primeros 50 para velocidad)
         progress_bar.progress(0.8)
-        status_text.text("🔍 Obteniendo datos completos de usuarios...")
+        status_text.text("🔍 Obteniendo datos completos...")
         
         enhanced_users = []
-        detail_limit = min(DETAIL_LIMIT, len(final_users))  # Límite para evitar sobrecarga
+        detail_limit = min(50, len(final_users))  # Límite reducido para velocidad
         
         for i, user in enumerate(final_users):
             if i < detail_limit:
                 detailed_user = get_user_details(user.get('id'), headers)
                 if detailed_user:
-                    # Preservar información de ubicación si existe
-                    if user.get('location_active'):
-                        detailed_user['location_active'] = True
-                        detailed_user['last_location'] = user.get('last_location')
+                    # Preservar información de ubicación
+                    detailed_user['location_active'] = True
+                    detailed_user['last_location'] = user.get('last_location')
                     enhanced_users.append(detailed_user)
                 else:
                     enhanced_users.append(user)
             else:
+                # Para el resto, usar datos básicos (más rápido)
+                user['location_active'] = True
                 enhanced_users.append(user)
             
-            # Actualizar progreso
+            # Actualizar progreso cada 10 usuarios
             if i % 10 == 0:
                 progress = 0.8 + (i / len(final_users)) * 0.2
                 progress_bar.progress(min(progress, 1.0))
         
         progress_bar.progress(1.0)
-        status_text.text(f"✅ Completado: {len(enhanced_users)} usuarios procesados")
-        time.sleep(1)  # Mostrar el mensaje final brevemente
+        status_text.text(f"✅ Completado: {len(enhanced_users)} usuarios activos en campus")
+        time.sleep(1)
         
         return enhanced_users
         
