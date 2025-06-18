@@ -96,177 +96,6 @@ def get_campus(headers):
         st.error(f"❌ Error: {str(e)}")
         return []
 
-# Configuración en sidebar
-with st.sidebar:
-    st.markdown("## ⚙️ Configuración")
-    
-    with st.expander("🔐 Configurar Credenciales"):
-        st.markdown("Agrega esto a tus secrets:")
-        st.code("""
-[api42]
-client_id = "TU_CLIENT_ID"
-client_secret = "TU_CLIENT_SECRET"
-        """, language="toml")
-    
-    st.markdown("---")
-    
-    # Obtener token para cargar campus
-    token = get_auth_token(client_id, client_secret)
-    if token:
-        headers = {"Authorization": f"Bearer {token}"}
-        campus_list = get_campus(headers)
-        
-        if campus_list:
-            # Crear diccionarios organizados por país
-            campus_by_country = {}
-            for campus in campus_list:
-                country = campus.get("country", "Sin País")
-                if country not in campus_by_country:
-                    campus_by_country[country] = []
-                campus_by_country[country].append(campus)
-            
-            # Filtros de ubicación
-            st.markdown("## 🌍 Selección de Campus")
-            
-            # Filtro por país
-            countries = sorted(campus_by_country.keys())
-            selected_country = st.selectbox(
-                "🌎 País",
-                ["Todos"] + countries,
-                index=0
-            )
-            
-            # Filtro por campus basado en el país seleccionado
-            if selected_country == "Todos":
-                available_campus = campus_list
-            else:
-                available_campus = campus_by_country[selected_country]
-            
-            campus_dict = {campus["name"]: campus["id"] for campus in available_campus}
-            
-            selected_campus = st.selectbox(
-                "🏫 Campus",
-                list(campus_dict.keys()),
-                index=0 if campus_dict else 0
-            )
-            
-            # Mostrar información del campus seleccionado
-            if selected_campus:
-                campus_id = campus_dict[selected_campus]
-                selected_campus_data = next((c for c in available_campus if c["name"] == selected_campus), None)
-                
-                if selected_campus_data:
-                    st.markdown("### 📍 Campus Seleccionado")
-                    st.markdown(f"**🏫 Nombre:** {selected_campus}")
-                    st.markdown(f"**🌎 País:** {selected_campus_data.get('country', 'N/A')}")
-                    st.markdown(f"**🆔 ID:** {campus_id}")
-                    if selected_campus_data.get('city'):
-                        st.markdown(f"**🏙️ Ciudad:** {selected_campus_data.get('city')}")
-                    st.markdown('<div class="status-success">✅ Conectado</div>', unsafe_allow_html=True)
-        else:
-            st.error("❌ No se pudieron cargar los campus")
-            st.stop()
-    else:
-        st.error("❌ Error de autenticación")
-        st.stop()
-    
-    st.markdown("---")
-    
-    # Auto-refresh
-    auto_refresh = st.checkbox("🔄 Auto-actualizar (60s)", value=False)
-    refresh_button = st.button("🔍 Ver usuarios activos", type="primary", use_container_width=True)
-    
-    st.markdown("---")
-    
-    # Configuración avanzada
-    with st.expander("⚙️ Opciones Avanzadas"):
-        days_back = st.slider("Días hacia atrás", 1, 30, 7)  # Aumenté el máximo a 30
-        max_users = st.slider("Máximo de usuarios", 20, 500, 200)  # Aumenté el límite
-        show_raw_data = st.checkbox("Mostrar datos raw")
-        show_charts = st.checkbox("Mostrar gráficos", value=True)
-        debug_mode = st.checkbox("Modo debug", value=False)
-        
-        # Nueva opción para método de búsqueda
-        search_method = st.selectbox(
-            "Método de búsqueda",
-            ["Híbrido", "Solo actividad reciente", "Solo ubicaciones activas"],
-            help="Híbrido: combina ambos métodos para mejores resultados"
-        )
-    
-    # Información adicional sobre el país/campus
-    if selected_country != "Todos":
-        with st.expander(f"🌍 Información de {selected_country}"):
-            country_campus = campus_by_country[selected_country]
-            st.markdown(f"**Total de campus:** {len(country_campus)}")
-            st.markdown("**Campus disponibles:**")
-            for campus in country_campus:
-                emoji = "📍" if campus["name"] == selected_campus else "🏫"
-                st.markdown(f"- {emoji} {campus['name']}")
-                if campus.get('city'):
-                    st.markdown(f"  📍 {campus['city']}")
-    
-    # Estadísticas globales
-    if campus_list:
-        with st.expander("📊 Estadísticas Globales"):
-            total_campus = len(campus_list)
-            total_countries = len(campus_by_country)
-            st.metric("🌍 Total Países", total_countries)
-            st.metric("🏫 Total Campus", total_campus)
-            
-            # Top 5 países con más campus
-            country_counts = {country: len(campuses) for country, campuses in campus_by_country.items()}
-            top_countries = sorted(country_counts.items(), key=lambda x: x[1], reverse=True)[:5]
-            
-            st.markdown("**🏆 Top 5 Países:**")
-            for country, count in top_countries:
-                st.markdown(f"- {country}: {count} campus")
-
-# Obtener credenciales
-credentials = st.secrets.get("api42", {})
-client_id = credentials.get("client_id")
-client_secret = credentials.get("client_secret")
-
-if not client_id or not client_secret:
-    st.error("❌ Faltan credenciales en los secrets. Verifica que estén correctamente configuradas en [api42].")
-    st.stop()
-
-# Función de autenticación
-@st.cache_data(ttl=3500)
-def get_auth_token(client_id, client_secret):
-    """Obtener token de acceso"""
-    auth_url = "https://api.intra.42.fr/oauth/token"
-    data = {
-        "grant_type": "client_credentials",
-        "client_id": client_id,
-        "client_secret": client_secret,
-    }
-    
-    try:
-        response = requests.post(auth_url, data=data, timeout=10)
-        if response.status_code == 200:
-            return response.json().get("access_token")
-        else:
-            st.error(f"❌ Error de autenticación: {response.status_code}")
-            return None
-    except Exception as e:
-        st.error(f"❌ Error de conexión: {str(e)}")
-        return None
-
-# Función para obtener campus
-@st.cache_data(ttl=3600)
-def get_campus(headers):
-    """Obtener lista de campus"""
-    try:
-        res = requests.get("https://api.intra.42.fr/v2/campus", headers=headers, timeout=10)
-        if res.status_code == 200:
-            return res.json()
-        else:
-            st.error(f"❌ Error al obtener campus: {res.status_code}")
-            return []
-    except Exception as e:
-        st.error(f"❌ Error: {str(e)}")
-        return []
-
 # Función para obtener datos completos de un usuario
 def get_user_details(user_id, headers):
     """Obtener detalles completos de un usuario incluyendo cursus"""
@@ -278,7 +107,6 @@ def get_user_details(user_id, headers):
         else:
             return None
     except Exception as e:
-        # Solo mostrar en debug mode si está disponible
         return None
 
 def handle_rate_limit(response, status_text, debug_mode=False):
@@ -545,51 +373,131 @@ def get_active_users(campus_id, headers, days_back=1, max_users=100, search_meth
     finally:
         progress_bar.empty()
         status_text.empty()
-            for user in activity_users:
-                user_id = user.get('id')
-                if user_id and user_id not in all_users:
-                    all_users[user_id] = user
+
+# Configuración en sidebar
+with st.sidebar:
+    st.markdown("## ⚙️ Configuración")
+    
+    with st.expander("🔐 Configurar Credenciales"):
+        st.markdown("Agrega esto a tus secrets:")
+        st.code("""
+[api42]
+client_id = "TU_CLIENT_ID"
+client_secret = "TU_CLIENT_SECRET"
+        """, language="toml")
+    
+    st.markdown("---")
+    
+    # Obtener token para cargar campus
+    token = get_auth_token(client_id, client_secret)
+    if token:
+        headers = {"Authorization": f"Bearer {token}"}
+        campus_list = get_campus(headers)
+        
+        if campus_list:
+            # Crear diccionarios organizados por país
+            campus_by_country = {}
+            for campus in campus_list:
+                country = campus.get("country", "Sin País")
+                if country not in campus_by_country:
+                    campus_by_country[country] = []
+                campus_by_country[country].append(campus)
             
-            progress_bar.progress(0.7)
-            status_text.text(f"✅ Usuarios con actividad reciente: {len(activity_users)}")
-        
-        final_users = list(all_users.values())[:max_users]
-        
-        # Obtener datos completos para usuarios seleccionados
-        progress_bar.progress(0.8)
-        status_text.text("🔍 Obteniendo datos completos de usuarios...")
-        
-        enhanced_users = []
-        detail_limit = min(50, len(final_users))  # Límite para evitar sobrecarga
-        
-        for i, user in enumerate(final_users):
-            if i < detail_limit:
-                detailed_user = get_user_details(user.get('id'), headers)
-                if detailed_user:
-                    # Preservar información de ubicación si existe
-                    if user.get('location_active'):
-                        detailed_user['location_active'] = True
-                        detailed_user['last_location'] = user.get('last_location')
-                    enhanced_users.append(detailed_user)
-                else:
-                    enhanced_users.append(user)
+            # Filtros de ubicación
+            st.markdown("## 🌍 Selección de Campus")
+            
+            # Filtro por país
+            countries = sorted(campus_by_country.keys())
+            selected_country = st.selectbox(
+                "🌎 País",
+                ["Todos"] + countries,
+                index=0
+            )
+            
+            # Filtro por campus basado en el país seleccionado
+            if selected_country == "Todos":
+                available_campus = campus_list
             else:
-                enhanced_users.append(user)
+                available_campus = campus_by_country[selected_country]
             
-            # Actualizar progreso
-            if i % 10 == 0:
-                progress = 0.8 + (i / len(final_users)) * 0.2
-                progress_bar.progress(min(progress, 1.0))
+            campus_dict = {campus["name"]: campus["id"] for campus in available_campus}
+            
+            selected_campus = st.selectbox(
+                "🏫 Campus",
+                list(campus_dict.keys()),
+                index=0 if campus_dict else 0
+            )
+            
+            # Mostrar información del campus seleccionado
+            if selected_campus:
+                campus_id = campus_dict[selected_campus]
+                selected_campus_data = next((c for c in available_campus if c["name"] == selected_campus), None)
+                
+                if selected_campus_data:
+                    st.markdown("### 📍 Campus Seleccionado")
+                    st.markdown(f"**🏫 Nombre:** {selected_campus}")
+                    st.markdown(f"**🌎 País:** {selected_campus_data.get('country', 'N/A')}")
+                    st.markdown(f"**🆔 ID:** {campus_id}")
+                    if selected_campus_data.get('city'):
+                        st.markdown(f"**🏙️ Ciudad:** {selected_campus_data.get('city')}")
+                    st.markdown('<div class="status-success">✅ Conectado</div>', unsafe_allow_html=True)
+        else:
+            st.error("❌ No se pudieron cargar los campus")
+            st.stop()
+    else:
+        st.error("❌ Error de autenticación")
+        st.stop()
+    
+    st.markdown("---")
+    
+    # Auto-refresh
+    auto_refresh = st.checkbox("🔄 Auto-actualizar (60s)", value=False)
+    refresh_button = st.button("🔍 Ver usuarios activos", type="primary", use_container_width=True)
+    
+    st.markdown("---")
+    
+    # Configuración avanzada
+    with st.expander("⚙️ Opciones Avanzadas"):
+        days_back = st.slider("Días hacia atrás", 1, 30, 7)
+        max_users = st.slider("Máximo de usuarios", 20, 500, 200)
+        show_raw_data = st.checkbox("Mostrar datos raw")
+        show_charts = st.checkbox("Mostrar gráficos", value=True)
+        debug_mode = st.checkbox("Modo debug", value=False)
         
-        progress_bar.progress(1.0)
-        status_text.text(f"✅ Completado: {len(enhanced_users)} usuarios procesados")
-        time.sleep(1)  # Mostrar el mensaje final brevemente
-        
-        return enhanced_users
-        
-    finally:
-        progress_bar.empty()
-        status_text.empty()
+        # Nueva opción para método de búsqueda
+        search_method = st.selectbox(
+            "Método de búsqueda",
+            ["Híbrido", "Solo actividad reciente", "Solo ubicaciones activas"],
+            help="Híbrido: combina ambos métodos para mejores resultados"
+        )
+    
+    # Información adicional sobre el país/campus
+    if selected_country != "Todos":
+        with st.expander(f"🌍 Información de {selected_country}"):
+            country_campus = campus_by_country[selected_country]
+            st.markdown(f"**Total de campus:** {len(country_campus)}")
+            st.markdown("**Campus disponibles:**")
+            for campus in country_campus:
+                emoji = "📍" if campus["name"] == selected_campus else "🏫"
+                st.markdown(f"- {emoji} {campus['name']}")
+                if campus.get('city'):
+                    st.markdown(f"  📍 {campus['city']}")
+    
+    # Estadísticas globales
+    if campus_list:
+        with st.expander("📊 Estadísticas Globales"):
+            total_campus = len(campus_list)
+            total_countries = len(campus_by_country)
+            st.metric("🌍 Total Países", total_countries)
+            st.metric("🏫 Total Campus", total_campus)
+            
+            # Top 5 países con más campus
+            country_counts = {country: len(campuses) for country, campuses in campus_by_country.items()}
+            top_countries = sorted(country_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+            
+            st.markdown("**🏆 Top 5 Países:**")
+            for country, count in top_countries:
+                st.markdown(f"- {country}: {count} campus")
 
 # Auto-refresh logic
 if auto_refresh:
@@ -617,70 +525,70 @@ if refresh_button or (auto_refresh and 'users_data' not in st.session_state):
             # Procesar datos mejorado
             df_data = []
             for user in users:
-                    try:
-                        # Determinar la fecha de última actividad con prioridad
-                        last_activity = None
-                        activity_sources = [
-                            user.get("last_location"),  # Ubicación más reciente
-                            user.get("updated_at"),     # Última actualización
-                            user.get("created_at")      # Creación (fallback)
-                        ]
-                        
-                        for activity_time in activity_sources:
-                            if activity_time:
-                                try:
-                                    if isinstance(activity_time, str):
-                                        # Manejar diferentes formatos de fecha
-                                        if activity_time.endswith('Z'):
-                                            last_activity = activity_time
-                                        else:
-                                            last_activity = activity_time
-                                        break
-                                except:
-                                    continue
-                        
-                        user_info = {
-                            "ID": user.get("id", 0),
-                            "Login": user.get("login", "N/A"),
-                            "Nombre": user.get("displayname", user.get("first_name", "") + " " + user.get("last_name", "")).strip(),
-                            "Correo": user.get("email", "N/A"),
-                            "Última conexión": last_activity,
-                            "Estado": "🟢 En campus" if user.get("location_active", False) else "🔵 Activo recientemente",
-                            "Nivel": 0.0,
-                            "Campus": "N/A",
-                            "Wallet": user.get("wallet", 0),
-                            "Evaluation Points": user.get("correction_point", 0)
-                        }
-                        
-                        # Obtener nivel del cursus de manera más robusta
-                        cursus_users = user.get("cursus_users", [])
-                        if cursus_users:
-                            # Buscar 42cursus primero
-                            for cursus in cursus_users:
-                                cursus_info = cursus.get("cursus", {})
-                                if cursus_info.get("name") == "42cursus" or cursus_info.get("slug") == "42cursus":
-                                    user_info["Nivel"] = round(cursus.get("level", 0), 2)
+                try:
+                    # Determinar la fecha de última actividad con prioridad
+                    last_activity = None
+                    activity_sources = [
+                        user.get("last_location"),  # Ubicación más reciente
+                        user.get("updated_at"),     # Última actualización
+                        user.get("created_at")      # Creación (fallback)
+                    ]
+                    
+                    for activity_time in activity_sources:
+                        if activity_time:
+                            try:
+                                if isinstance(activity_time, str):
+                                    # Manejar diferentes formatos de fecha
+                                    if activity_time.endswith('Z'):
+                                        last_activity = activity_time
+                                    else:
+                                        last_activity = activity_time
                                     break
-                            else:
-                                # Si no hay 42cursus, tomar el nivel más alto
-                                max_level = 0
-                                for cursus in cursus_users:
-                                    level = cursus.get("level", 0)
-                                    if level > max_level:
-                                        max_level = level
-                                user_info["Nivel"] = round(max_level, 2)
-                        
-                        # Obtener campus
-                        campus_info = user.get("campus", [])
-                        if isinstance(campus_info, list) and campus_info:
-                            user_info["Campus"] = campus_info[0].get("name", "N/A")
-                        elif isinstance(campus_info, dict):
-                            user_info["Campus"] = campus_info.get("name", "N/A")
-                        
-                        df_data.append(user_info)
-                        
-                    except Exception as e:
-                        continue
+                            except:
+                                continue
+                    
+                    user_info = {
+                        "ID": user.get("id", 0),
+                        "Login": user.get("login", "N/A"),
+                        "Nombre": user.get("displayname", user.get("first_name", "") + " " + user.get("last_name", "")).strip(),
+                        "Correo": user.get("email", "N/A"),
+                        "Última conexión": last_activity,
+                        "Estado": "🟢 En campus" if user.get("location_active", False) else "🔵 Activo recientemente",
+                        "Nivel": 0.0,
+                        "Campus": "N/A",
+                        "Wallet": user.get("wallet", 0),
+                        "Evaluation Points": user.get("correction_point", 0)
+                    }
+                    
+                    # Obtener nivel del cursus de manera más robusta
+                    cursus_users = user.get("cursus_users", [])
+                    if cursus_users:
+                        # Buscar 42cursus primero
+                        for cursus in cursus_users:
+                            cursus_info = cursus.get("cursus", {})
+                            if cursus_info.get("name") == "42cursus" or cursus_info.get("slug") == "42cursus":
+                                user_info["Nivel"] = round(cursus.get("level", 0), 2)
+                                break
+                        else:
+                            # Si no hay 42cursus, tomar el nivel más alto
+                            max_level = 0
+                            for cursus in cursus_users:
+                                level = cursus.get("level", 0)
+                                if level > max_level:
+                                    max_level = level
+                            user_info["Nivel"] = round(max_level, 2)
+                    
+                    # Obtener campus
+                    campus_info = user.get("campus", [])
+                    if isinstance(campus_info, list) and campus_info:
+                        user_info["Campus"] = campus_info[0].get("name", "N/A")
+                    elif isinstance(campus_info, dict):
+                        user_info["Campus"] = campus_info.get("name", "N/A")
+                    
+                    df_data.append(user_info)
+                    
+                except Exception as e:
+                    continue
             
             df = pd.DataFrame(df_data)
             
@@ -962,8 +870,6 @@ if 'users_data' in st.session_state and not st.session_state.users_data.empty:
     )
     
     st.info(f"📊 Mostrando {len(filtered_df)} de {len(df)} usuarios")
-    
-    # Información de depuración (removida para simplificar)
     
     # Datos raw si están habilitados
     if show_raw_data and 'users_raw' in st.session_state:
