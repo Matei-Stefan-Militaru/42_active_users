@@ -167,7 +167,23 @@ try:
                             elif isinstance(campus_info, dict):
                                 user_info["Campus"] = campus_info.get("name", "N/A")
                             
-                            df_data.append(user_info)
+                            # Debug para usuarios con nivel 0 (opcional)
+                        if debug_mode and user_info["Nivel"] == 0.0:
+                            st.write(f"⚠️ **Usuario sin nivel:** {user_info['Login']}")
+                            if cursus_users:
+                                st.write(f"  - Cursus encontrados: {len(cursus_users)}")
+                                for i, cursus in enumerate(cursus_users):
+                                    if isinstance(cursus, dict):
+                                        cursus_info = cursus.get("cursus", {})
+                                        level = cursus.get("level", "N/A")
+                                        name = cursus_info.get("name", "Sin nombre") if isinstance(cursus_info, dict) else "Sin info"
+                                        st.write(f"    - Cursus {i+1}: {name} - Nivel: {level}")
+                            else:
+                                st.write("  - Sin cursus_users")
+                                if user.get("level"):
+                                    st.write(f"  - Level directo: {user.get('level')}")
+                        
+                        df_data.append(user_info)
                             
                         except Exception as e:
                             continue
@@ -266,22 +282,20 @@ try:
         # Estado inicial - mostrar ayuda
         render_help_section()
 
-    # Footer mejorado
+    # Footer compacto
     st.markdown("---")
     campus_name = st.session_state.get('selected_campus', 'Ninguno')
     days = st.session_state.get('days_back', days_back)
     method = st.session_state.get('search_method', search_method)
-    country_name = selected_country
     
-    st.markdown(
-        f"💡 **42 Network - Finding Your Evaluator v2.3** | "
-        f"País: {country_name} | "
-        f"Campus: {campus_name} | "
-        f"Período: {days} día(s) | "
-        f"Método: {method} | "
-        f"🔄 Auto-actualizar: {'✅' if auto_refresh else '❌'} | "
-        f"⚡ Auto-cargar: {'✅' if auto_load else '❌'} | "
-        f"🐛 Debug: {'✅' if debug_mode else '❌'}"
+    st.caption(
+        f"**42 Evaluator v2.3** | "
+        f"{campus_name} | "
+        f"{days}d | "
+        f"{method[:8]} | "
+        f"🔄{'✅' if auto_refresh else '❌'} | "
+        f"⚡{'✅' if auto_load else '❌'} | "
+        f"🐛{'✅' if debug_mode else '❌'}"
     )
 
 except Exception as e:
