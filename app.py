@@ -41,7 +41,7 @@ try:
     selected_country = sidebar_config['selected_country']
     campus_id = sidebar_config['campus_id']
     auto_refresh = sidebar_config['auto_refresh']
-    auto_load = sidebar_config.get('auto_load', True)  # Default True si no existe
+    auto_load = sidebar_config.get('auto_load', True)
     refresh_button = sidebar_config['refresh_button']
     days_back = sidebar_config['days_back']
     max_users = sidebar_config['max_users']
@@ -97,92 +97,123 @@ try:
             loading_message = f"🔄 Auto-cargando datos para {selected_campus}..."
         
         with st.spinner(loading_message):
-            for user in users:
-    try:
-        # Determinar la fecha de última actividad con prioridad
-        last_activity = None
-        activity_sources = [
-            user.get("last_location"),  # Ubicación más reciente
-            user.get("updated_at"),     # Última actualización
-            user.get("created_at")      # Creación (fallback)
-        ]
-        
-        for activity_time in activity_sources:
-            if activity_time:
-                try:
-                    if isinstance(activity_time, str):
-                        # Manejar diferentes formatos de fecha
-                        if activity_time.endswith('Z'):
-                            last_activity = activity_time
-                        else:
-                            last_activity = activity_time
-                        break
-                except:
-                    continue
-        
-        user_info = {
-            "ID": user.get("id", 0),
-            "Login": user.get("login", "N/A"),
-            "Nombre": user.get("displayname", user.get("first_name", "") + " " + user.get("last_name", "")).strip(),
-            "Correo": user.get("email", "N/A"),
-            "Última conexión": last_activity,
-            "Estado": "🟢 En campus" if user.get("location_active", False) else "🔵 Activo recientemente",
-            "Nivel": 0.0,
-            "Campus": "N/A",
-            "Wallet": user.get("wallet", 0),
-            "Evaluation Points": user.get("correction_point", 0)
-        }
-        
-        # Obtener nivel del cursus de manera más robusta
-        cursus_users = user.get("cursus_users", [])
-        if cursus_users:
-            # Buscar 42cursus primero
-            for cursus in cursus_users:
-                cursus_info = cursus.get("cursus", {})
-                if cursus_info.get("name") == "42cursus" or cursus_info.get("slug") == "42cursus":
-                    user_info["Nivel"] = round(cursus.get("level", 0), 2)
-                    break
-            else:
-                # Si no hay 42cursus, tomar el nivel más alto
-                max_level = 0
-                for cursus in cursus_users:
-                    level = cursus.get("level", 0)
-                    if level > max_level:
-                        max_level = level
-                user_info["Nivel"] = round(max_level, 2)
-        
-        # Obtener campus
-        campus_info = user.get("campus", [])
-        if isinstance(campus_info, list) and campus_info:
-            user_info["Campus"] = campus_info[0].get("name", "N/A")
-        elif isinstance(campus_info, dict):
-            user_info["Campus"] = campus_info.get("name", "N/A")
-        
-        # Debug para usuarios con nivel 0 (opcional)
-        if debug_mode and user_info["Nivel"] == 0.0:
-            st.write(f"⚠️ **Usuario sin nivel:** {user_info['Login']}")
-            if cursus_users:
-                st.write(f"  - Cursus encontrados: {len(cursus_users)}")
-                for i, cursus in enumerate(cursus_users):
-                    if isinstance(cursus, dict):
-                        cursus_info = cursus.get("cursus", {})
-                        level = cursus.get("level", "N/A")
-                        name = cursus_info.get("name", "Sin nombre") if isinstance(cursus_info, dict) else "Sin info"
-                        st.write(f"    - Cursus {i+1}: {name} - Nivel: {level}")
-            else:
-                st.write("  - Sin cursus_users")
-                if user.get("level"):
-                    st.write(f"  - Level directo: {user.get('level')}")
-        
-        df_data.append(user_info)
-        
-    except Exception as e:
-        if debug_mode:
-            st.error(f"❌ Error procesando usuario: {str(e)}")
-        continue
-
-df = pd.DataFrame(df_data)
+            try:
+                users = get_active_users(campus_id, headers, days_back, max_users, search_method, debug_mode)
+                
+                if not users:
+                    st.info(f"📝 No se encontraron usuarios activos en {selected_campus} en los últimos {days_back} día(s).")
+                    st.session_state.users_data = pd.DataFrame()
+                else:
+                    # Procesar datos mejorado
+                    df_data = []
+                    for user in users:
+                        try:
+                            # Determinar la fecha de última actividad con prioridad
+                            last_activity = None
+                            activity_sources = [
+                                user.get("last_location"),  # Ubicación más reciente
+                                user.get("updated_at"),     # Última actualización
+                                user.get("created_at")      # Creación (fallback)
+                            ]
+                            
+                            for activity_time in activity_sources:
+                                if activity_time:
+                                    try:
+                                        if isinstance(activity_time, str):
+                                            # Manejar diferentes formatos de fecha
+                                            if activity_time.endswith('Z'):
+                                                last_activity = activity_time
+                                            else:
+                                                last_activity = activity_time
+                                            break
+                                    except:
+                                        continue
+                            
+                            user_info = {
+                                "ID": user.get("id", 0),
+                                "Login": user.get("login", "N/A"),
+                                "Nombre": user.get("displayname", user.get("first_name", "") + " " + user.get("last_name", "")).strip(),
+                                "Correo": user.get("email", "N/A"),
+                                "Última conexión": last_activity,
+                                "Estado": "🟢 En campus" if user.get("location_active", False) else "🔵 Activo recientemente",
+                                "Nivel": 0.0,
+                                "Campus": "N/A",
+                                "Wallet": user.get("wallet", 0),
+                                "Evaluation Points": user.get("correction_point", 0)
+                            }
+                            
+                            # Obtener nivel del cursus de manera más robusta
+                            user_info["Nivel"] = 0.0  # Valor por defecto
+                            
+                            cursus_users = user.get("cursus_users", [])
+                            if cursus_users and isinstance(cursus_users, list):
+                                max_level = 0.0
+                                found_42cursus = False
+                                
+                                # Buscar 42cursus por ID (21) o nombre
+                                for cursus in cursus_users:
+                                    if isinstance(cursus, dict):
+                                        cursus_info = cursus.get("cursus", {})
+                                        level = float(cursus.get("level", 0))
+                                        cursus_id_check = cursus.get("cursus_id")
+                                        
+                                        # Verificar si es 42cursus por ID o nombre
+                                        if cursus_id_check == 21 or \
+                                           (isinstance(cursus_info, dict) and 
+                                            ("42cursus" in str(cursus_info.get("name", "")).lower() or
+                                             "42cursus" in str(cursus_info.get("slug", "")).lower())):
+                                            user_info["Nivel"] = round(level, 2)
+                                            found_42cursus = True
+                                            break
+                                        
+                                        # Guardar el nivel más alto como backup
+                                        if level > max_level:
+                                            max_level = level
+                                
+                                # Si no encontró 42cursus, usar el nivel más alto
+                                if not found_42cursus and max_level > 0:
+                                    user_info["Nivel"] = round(max_level, 2)
+                            
+                            # Verificar si el usuario tiene level directamente (algunos casos especiales)
+                            elif user.get("level") is not None:
+                                try:
+                                    direct_level = float(user.get("level", 0))
+                                    if direct_level > 0:
+                                        user_info["Nivel"] = round(direct_level, 2)
+                                except (ValueError, TypeError):
+                                    pass
+                            
+                            # Obtener campus
+                            campus_info = user.get("campus", [])
+                            if isinstance(campus_info, list) and campus_info:
+                                user_info["Campus"] = campus_info[0].get("name", "N/A")
+                            elif isinstance(campus_info, dict):
+                                user_info["Campus"] = campus_info.get("name", "N/A")
+                            
+                            # Debug para usuarios con nivel 0 (opcional)
+                            if debug_mode and user_info["Nivel"] == 0.0:
+                                st.write(f"⚠️ **Usuario sin nivel:** {user_info['Login']}")
+                                if cursus_users:
+                                    st.write(f"  - Cursus encontrados: {len(cursus_users)}")
+                                    for i, cursus in enumerate(cursus_users):
+                                        if isinstance(cursus, dict):
+                                            cursus_info = cursus.get("cursus", {})
+                                            level = cursus.get("level", "N/A")
+                                            name = cursus_info.get("name", "Sin nombre") if isinstance(cursus_info, dict) else "Sin info"
+                                            st.write(f"    - Cursus {i+1}: {name} - Nivel: {level}")
+                                else:
+                                    st.write("  - Sin cursus_users")
+                                    if user.get("level"):
+                                        st.write(f"  - Level directo: {user.get('level')}")
+                            
+                            df_data.append(user_info)
+                            
+                        except Exception as e:
+                            if debug_mode:
+                                st.error(f"❌ Error procesando usuario: {str(e)}")
+                            continue
                     
+                    df = pd.DataFrame(df_data)
                     
                     # Procesar timestamps con mejor manejo de errores
                     if not df.empty:
