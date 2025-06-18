@@ -31,18 +31,6 @@ def render_sidebar():
         
         st.markdown("---")
         
-        st.markdown("## ⚙️ Configuración")
-        
-        with st.expander("🔐 Configurar Credenciales"):
-            st.markdown("Agrega esto a tus secrets:")
-            st.code("""
-[api42]
-client_id = "TU_CLIENT_ID"
-client_secret = "TU_CLIENT_SECRET"
-            """, language="toml")
-        
-        st.markdown("---")
-        
         # Obtener credenciales
         credentials = st.secrets.get("api42", {})
         client_id = credentials.get("client_id")
@@ -126,28 +114,45 @@ client_secret = "TU_CLIENT_SECRET"
         st.markdown("---")
         
         # Configuración avanzada
-        with st.expander("⚙️ Opciones Avanzadas"):
-            days_back = st.slider("Días hacia atrás", 1, 30, DEFAULT_DAYS_BACK)
-            max_users = st.slider("Máximo de usuarios", 20, 500, DEFAULT_MAX_USERS)
-            show_raw_data = st.checkbox("Mostrar datos raw")
-            show_charts = st.checkbox("Mostrar gráficos", value=True)
-            debug_mode = st.checkbox("Modo debug", value=False)
-            
-            # Debug específico para campus
-            debug_mode_campus = st.checkbox("Debug campus", value=False, help="Muestra información detallada sobre la carga de campus")
-            st.session_state.debug_mode_campus = debug_mode_campus
-            
-            # Nueva opción para método de búsqueda
-            search_method = st.selectbox(
-                "Método de búsqueda",
-                SEARCH_METHODS,
-                help="Híbrido: combina ambos métodos para mejores resultados"
-            )
-            
-            # Botón para recargar campus
-            if st.button("🔄 Recargar Campus", help="Fuerza la recarga de la lista de campus"):
-                st.cache_data.clear()
-                st.rerun()
+        st.markdown("## ⚙️ Opciones Avanzadas")
+        days_back = st.slider("Días hacia atrás", 1, 30, DEFAULT_DAYS_BACK)
+        max_users = st.slider("Máximo de usuarios", 20, 500, DEFAULT_MAX_USERS)
+        show_raw_data = st.checkbox("Mostrar datos raw")
+        show_charts = st.checkbox("Mostrar gráficos", value=True)
+        debug_mode = st.checkbox("Modo debug", value=False)
+        
+        # Debug específico para campus
+        debug_mode_campus = st.checkbox("Debug campus", value=False, help="Muestra información detallada sobre la carga de campus")
+        st.session_state.debug_mode_campus = debug_mode_campus
+        
+        # Nueva opción para método de búsqueda
+        search_method = st.selectbox(
+            "Método de búsqueda",
+            SEARCH_METHODS,
+            help="Híbrido: combina ambos métodos para mejores resultados"
+        )
+        
+        # Botón para recargar campus
+        if st.button("🔄 Recargar Campus", help="Fuerza la recarga de la lista de campus"):
+            st.cache_data.clear()
+            st.rerun()
+        
+        st.markdown("---")
+        
+        # Estadísticas globales
+        st.markdown("## 📊 Estadísticas Globales")
+        total_campus = len(campus_list)
+        total_countries = len(campus_by_country)
+        st.metric("🌍 Total Países", total_countries)
+        st.metric("🏫 Total Campus", total_campus)
+        
+        # Top 5 países con más campus
+        country_counts = {country: len(campuses) for country, campuses in campus_by_country.items()}
+        top_countries = sorted(country_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+        
+        st.markdown("**🏆 Top 5 Países:**")
+        for country, count in top_countries:
+            st.markdown(f"- {country}: {count} campus")
         
         # Información adicional sobre el país/campus
         if selected_country != "Todos":
@@ -160,22 +165,6 @@ client_secret = "TU_CLIENT_SECRET"
                     st.markdown(f"- {emoji} {campus['name']}")
                     if campus.get('city'):
                         st.markdown(f"  📍 {campus['city']}")
-        
-        # Estadísticas globales
-        if campus_list:
-            with st.expander("📊 Estadísticas Globales"):
-                total_campus = len(campus_list)
-                total_countries = len(campus_by_country)
-                st.metric("🌍 Total Países", total_countries)
-                st.metric("🏫 Total Campus", total_campus)
-                
-                # Top 5 países con más campus
-                country_counts = {country: len(campuses) for country, campuses in campus_by_country.items()}
-                top_countries = sorted(country_counts.items(), key=lambda x: x[1], reverse=True)[:5]
-                
-                st.markdown("**🏆 Top 5 Países:**")
-                for country, count in top_countries:
-                    st.markdown(f"- {country}: {count} campus")
     
     # Retornar valores necesarios para el main
     return {
