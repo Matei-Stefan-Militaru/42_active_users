@@ -545,10 +545,10 @@ def get_active_users(campus_id, headers, days_back=1, max_users=100, search_meth
     finally:
         progress_bar.empty()
         status_text.empty()
-        for user in activity_users:
-            user_id = user.get('id')
-            if user_id and user_id not in all_users:
-                all_users[user_id] = user
+            for user in activity_users:
+                user_id = user.get('id')
+                if user_id and user_id not in all_users:
+                    all_users[user_id] = user
             
             progress_bar.progress(0.7)
             status_text.text(f"✅ Usuarios con actividad reciente: {len(activity_users)}")
@@ -586,6 +586,10 @@ def get_active_users(campus_id, headers, days_back=1, max_users=100, search_meth
         time.sleep(1)  # Mostrar el mensaje final brevemente
         
         return enhanced_users
+        
+    finally:
+        progress_bar.empty()
+        status_text.empty()
 
 # Auto-refresh logic
 if auto_refresh:
@@ -613,71 +617,69 @@ if refresh_button or (auto_refresh and 'users_data' not in st.session_state):
             # Procesar datos mejorado
             df_data = []
             for user in users:
-                try:
-                    # Determinar la fecha de última actividad con prioridad
-                    last_activity = None
-                    activity_sources = [
-                        user.get("last_location"),  # Ubicación más reciente
-                        user.get("updated_at"),     # Última actualización
-                        user.get("created_at")      # Creación (fallback)
-                    ]
-                    
-                    for activity_time in activity_sources:
-                        if activity_time:
-                            try:
-                                if isinstance(activity_time, str):
-                                    # Manejar diferentes formatos de fecha
-                                    if activity_time.endswith('Z'):
-                                        last_activity = activity_time
-                                    else:
-                                        last_activity = activity_time
-                                    break
-                            except:
-                                continue
-                    
-                    user_info = {
-                        "ID": user.get("id", 0),
-                        "Login": user.get("login", "N/A"),
-                        "Nombre": user.get("displayname", user.get("first_name", "") + " " + user.get("last_name", "")).strip(),
-                        "Correo": user.get("email", "N/A"),
-                        "Última conexión": last_activity,
-                        "Estado": "🟢 En campus" if user.get("location_active", False) else "🔵 Activo recientemente",
-                        "Nivel": 0.0,
-                        "Campus": "N/A",
-                        "Wallet": user.get("wallet", 0),
-                        "Evaluation Points": user.get("correction_point", 0)
-                    }
-                    
-                    # Obtener nivel del cursus de manera más robusta
-                    cursus_users = user.get("cursus_users", [])
-                    if cursus_users:
-                        # Buscar 42cursus primero
-                        for cursus in cursus_users:
-                            cursus_info = cursus.get("cursus", {})
-                            if cursus_info.get("name") == "42cursus" or cursus_info.get("slug") == "42cursus":
-                                user_info["Nivel"] = round(cursus.get("level", 0), 2)
-                                break
-                        else:
-                            # Si no hay 42cursus, tomar el nivel más alto
-                            max_level = 0
+                    try:
+                        # Determinar la fecha de última actividad con prioridad
+                        last_activity = None
+                        activity_sources = [
+                            user.get("last_location"),  # Ubicación más reciente
+                            user.get("updated_at"),     # Última actualización
+                            user.get("created_at")      # Creación (fallback)
+                        ]
+                        
+                        for activity_time in activity_sources:
+                            if activity_time:
+                                try:
+                                    if isinstance(activity_time, str):
+                                        # Manejar diferentes formatos de fecha
+                                        if activity_time.endswith('Z'):
+                                            last_activity = activity_time
+                                        else:
+                                            last_activity = activity_time
+                                        break
+                                except:
+                                    continue
+                        
+                        user_info = {
+                            "ID": user.get("id", 0),
+                            "Login": user.get("login", "N/A"),
+                            "Nombre": user.get("displayname", user.get("first_name", "") + " " + user.get("last_name", "")).strip(),
+                            "Correo": user.get("email", "N/A"),
+                            "Última conexión": last_activity,
+                            "Estado": "🟢 En campus" if user.get("location_active", False) else "🔵 Activo recientemente",
+                            "Nivel": 0.0,
+                            "Campus": "N/A",
+                            "Wallet": user.get("wallet", 0),
+                            "Evaluation Points": user.get("correction_point", 0)
+                        }
+                        
+                        # Obtener nivel del cursus de manera más robusta
+                        cursus_users = user.get("cursus_users", [])
+                        if cursus_users:
+                            # Buscar 42cursus primero
                             for cursus in cursus_users:
-                                level = cursus.get("level", 0)
-                                if level > max_level:
-                                    max_level = level
-                            user_info["Nivel"] = round(max_level, 2)
-                    
-                    # Obtener campus
-                    campus_info = user.get("campus", [])
-                    if isinstance(campus_info, list) and campus_info:
-                        user_info["Campus"] = campus_info[0].get("name", "N/A")
-                    elif isinstance(campus_info, dict):
-                        user_info["Campus"] = campus_info.get("name", "N/A")
-                    
-                    df_data.append(user_info)
-                    
+                                cursus_info = cursus.get("cursus", {})
+                                if cursus_info.get("name") == "42cursus" or cursus_info.get("slug") == "42cursus":
+                                    user_info["Nivel"] = round(cursus.get("level", 0), 2)
+                                    break
+                            else:
+                                # Si no hay 42cursus, tomar el nivel más alto
+                                max_level = 0
+                                for cursus in cursus_users:
+                                    level = cursus.get("level", 0)
+                                    if level > max_level:
+                                        max_level = level
+                                user_info["Nivel"] = round(max_level, 2)
+                        
+                        # Obtener campus
+                        campus_info = user.get("campus", [])
+                        if isinstance(campus_info, list) and campus_info:
+                            user_info["Campus"] = campus_info[0].get("name", "N/A")
+                        elif isinstance(campus_info, dict):
+                            user_info["Campus"] = campus_info.get("name", "N/A")
+                        
+                        df_data.append(user_info)
+                        
                     except Exception as e:
-                        if debug_mode:
-                            st.warning(f"⚠️ Error procesando usuario {user.get('login', 'unknown')}: {str(e)}")
                         continue
             
             df = pd.DataFrame(df_data)
@@ -713,9 +715,6 @@ if refresh_button or (auto_refresh and 'users_data' not in st.session_state):
                     # Filtrar usuarios dentro del rango
                     date_mask = df["Última conexión"] >= past_date
                     df = df[date_mask]
-                    
-                    if debug_mode:
-                        st.info(f"🔍 Filtro de fecha: {len(df)} usuarios con actividad desde {past_date.strftime('%Y-%m-%d %H:%M')}")
                 
                 # Ordenar por última conexión
                 df = df.sort_values("Última conexión", ascending=False)
@@ -964,39 +963,7 @@ if 'users_data' in st.session_state and not st.session_state.users_data.empty:
     
     st.info(f"📊 Mostrando {len(filtered_df)} de {len(df)} usuarios")
     
-    # Información de depuración
-    if debug_mode:
-        st.markdown("## 🐛 Información de Depuración")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("### ⚙️ Configuración Actual")
-            st.json({
-                "campus_id": campus_id,
-                "selected_campus": selected_campus,
-                "selected_country": selected_country,
-                "days_back": st.session_state.get('days_back', days_back),
-                "max_users": max_users,
-                "search_method": st.session_state.get('search_method', search_method),
-                "total_users_found": len(df),
-                "date_range": {
-                    "start": (datetime.now(timezone.utc) - timedelta(days=days_back)).strftime("%Y-%m-%d %H:%M:%S"),
-                    "end": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-                }
-            })
-        
-        with col2:
-            st.markdown("### 📊 Estadísticas de Datos")
-            if not df.empty:
-                st.json({
-                    "users_in_campus": len(df[df['Estado'].str.contains('En campus')]),
-                    "users_recently_active": len(df[df['Estado'].str.contains('Activo recientemente')]),
-                    "earliest_activity": df['Última conexión'].min().strftime('%Y-%m-%d %H:%M:%S'),
-                    "latest_activity": df['Última conexión'].max().strftime('%Y-%m-%d %H:%M:%S'),
-                    "avg_level": round(df['Nivel'].mean(), 2),
-                    "max_level": round(df['Nivel'].max(), 2)
-                })
+    # Información de depuración (removida para simplificar)
     
     # Datos raw si están habilitados
     if show_raw_data and 'users_raw' in st.session_state:
@@ -1016,11 +983,12 @@ else:
         - 🏆 **Rankings:** Top usuarios por nivel y distribución
         - 💰 **Métricas:** Wallet, puntos de evaluación y más
         
-        **Filtros mejorados:**
-        - 🌍 **Filtro por país:** Selecciona el país para ver sus campus
-        - 🏫 **Filtro por campus:** Elige el campus específico a analizar
-        - 📊 **Estadísticas globales:** Ve información de todos los países y campus
-        - ✅ **Información del campus:** Detalles del campus seleccionado
+        **Funcionalidades principales:**
+        - ✅ **Filtrado por país y campus:** Navega fácilmente por toda la red 42
+        - ✅ **Múltiples métodos de búsqueda:** Híbrido, actividad reciente, ubicaciones activas
+        - ✅ **Análisis temporal:** Distribución de actividad por hora y día
+        - ✅ **Rankings y métricas:** Top usuarios, niveles, wallet y puntos
+        - ✅ **Interfaz optimizada:** Filtros intuitivos y visualizaciones claras
         
         **Métodos de búsqueda:**
         - **Híbrido:** Combina usuarios en campus + actividad reciente (recomendado)
