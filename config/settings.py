@@ -25,11 +25,6 @@ MAIN_CSS = """
         margin-bottom: 5px;    /* Espacio debajo del header */
         margin-top: 5px;         /* Espacio arriba del header */
     }
-
-    /* Añade aquí tus modificaciones específicas */
-    .st-emotion-cache-16txtl3 {
-        padding: 1rem 1.5rem;              /* Tu modificación personalizada */
-    }
     
     /* ========== CAJAS DE ESTADO ========== */
     .status-success { 
