@@ -1,4 +1,4 @@
-# ui/sidebar.py
+'auto_load': auto_load,# ui/sidebar.py
 
 import streamlit as st
 from api.auth import get_auth_token
@@ -150,6 +150,7 @@ def render_sidebar():
         
         # Auto-refresh
         auto_refresh = st.checkbox("🔄 Auto-actualizar (60s)", value=False)
+        auto_load = st.checkbox("⚡ Auto-cargar al cambiar campus", value=True, help="Carga datos automáticamente cuando cambias de campus")
         refresh_button = st.button("🔍 Ver usuarios activos", type="primary", use_container_width=True)
         
         st.markdown("---")
@@ -174,6 +175,7 @@ def render_sidebar():
         'campus_id': campus_id,
         'campus_by_country': campus_by_country,
         'auto_refresh': auto_refresh,
+        'auto_load': auto_load,
         'refresh_button': refresh_button,
         'days_back': days_back,
         'max_users': max_users,
