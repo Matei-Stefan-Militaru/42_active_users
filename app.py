@@ -92,9 +92,9 @@ should_load_data = (
     (config_changed and auto_load)
 )
     # Mostrar indicador de carga automática si es por cambio de configuración
-loading_message = f"🔍 Cargando usuarios activos de {selected_campus}..."
-if config_changed and not refresh_button:
-    loading_message = f"🔄 Auto-cargando datos para {selected_campus}..."
+    loading_message = f"🔍 Cargando usuarios activos de {selected_campus}..."
+    if config_changed and not refresh_button:
+        loading_message = f"🔄 Auto-cargando datos para {selected_campus}..."
     
     with st.spinner(loading_message):
         try:
