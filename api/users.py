@@ -1,0 +1,283 @@
+# api/users.py
+
+import streamlit as st
+import requests
+import time
+from datetime import datetime, timedelta, timezone
+from config.settings import API_BASE_URL, DEFAULT_RETRY_AFTER, DEFAULT_PAGE_SIZE, DETAIL_LIMIT
+
+def get_user_details(user_id, headers):
+    """Obtener detalles completos de un usuario incluyendo cursus"""
+    try:
+        url = f"{API_BASE_URL}/v2/users/{user_id}?filter[cursus]=on"
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            return None
+    except Exception as e:
+        return None
+
+def handle_rate_limit(response, status_text, debug_mode=False):
+    """Manejar rate limiting de la API"""
+    if response.status_code == 429:
+        retry_after = int(response.headers.get('Retry-After', DEFAULT_RETRY_AFTER))
+        if debug_mode:
+            st.warning(f"⏳ Rate limit alcanzado - esperando {retry_after}s...")
+        status_text.text(f"⏳ Rate limit - esperando {retry_after}s...")
+        time.sleep(retry_after)
+        return True
+    return False
+
+def get_users_by_activity(campus_id, headers, days_back, max_users, status_text, progress_bar, debug_mode=False):
+    """Obtener usuarios con actividad reciente usando múltiples endpoints"""
+    users = []
+    
+    # Calcular fechas correctamente
+    now = datetime.now(timezone.utc)
+    past_date = now - timedelta(days=days_back)
+    
+    # Formatear fechas para la API (ISO 8601)
+    date_filter_start = past_date.strftime("%Y-%m-%dT%H:%M:%SZ")
+    date_filter_end = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    
+    if debug_mode:
+        st.info(f"🔍 Buscando actividad entre: {date_filter_start} y {date_filter_end}")
+    
+    status_text.text(f"🔍 Buscando usuarios con actividad reciente ({days_back} días)...")
+    
+    # Endpoints a probar con diferentes estrategias
+    endpoints_to_try = [
+        # Método 1: Filtrar por updated_at (actividad general)
+        f"{API_BASE_URL}/v2/users?filter[campus_id]={campus_id}&range[updated_at]={date_filter_start},{date_filter_end}&sort=-updated_at",
+        
+        # Método 2: Filtrar por created_at para usuarios nuevos
+        f"{API_BASE_URL}/v2/users?filter[campus_id]={campus_id}&range[created_at]={date_filter_start},{date_filter_end}&sort=-created_at",
+        
+        # Método 3: Campus específico con updated_at
+        f"{API_BASE_URL}/v2/campus/{campus_id}/users?range[updated_at]={date_filter_start},{date_filter_end}&sort=-updated_at",
+        
+        # Método 4: Sin filtro de fecha pero ordenado por actividad
+        f"{API_BASE_URL}/v2/campus/{campus_id}/users?sort=-updated_at",
+        
+        # Método 5: General sin filtros específicos
+        f"{API_BASE_URL}/v2/users?filter[campus_id]={campus_id}&sort=-updated_at"
+    ]
+    
+    for method_idx, base_url in enumerate(endpoints_to_try):
+        if len(users) >= max_users:
+            break
+            
+        status_text.text(f"🔍 Método {method_idx + 1}/{len(endpoints_to_try)}: Probando endpoint...")
+        
+        page = 1
+        max_pages = min(10, (max_users // 100) + 1)
+        method_users = []
+        
+        while page <= max_pages and len(method_users) < max_users:
+            try:
+                # Construir URL con paginación
+                url = f"{base_url}&page[size]={DEFAULT_PAGE_SIZE}&page[number]={page}"
+                
+                if debug_mode:
+                    st.code(f"URL: {url}")
+                
+                response = requests.get(url, headers=headers, timeout=20)
+                
+                # Manejar rate limiting
+                if handle_rate_limit(response, status_text, debug_mode):
+                    continue
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    
+                    if not data:
+                        if debug_mode:
+                            st.info(f"📭 Método {method_idx + 1}, página {page}: Sin datos")
+                        break
+                    
+                    # Filtrar usuarios por fecha manualmente si la API no lo hizo
+                    filtered_users = []
+                    for user in data:
+                        # Verificar fecha de actividad
+                        user_updated = user.get('updated_at')
+                        user_created = user.get('created_at')
+                        
+                        # Parsear fechas
+                        activity_date = None
+                        for date_str in [user_updated, user_created]:
+                            if date_str:
+                                try:
+                                    activity_date = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                                    break
+                                except:
+                                    continue
+                        
+                        # Verificar si está en el rango de fechas
+                        if activity_date and activity_date >= past_date:
+                            # Verificar que pertenece al campus correcto
+                            user_campus = user.get('campus', [])
+                            campus_match = False
+                            
+                            if isinstance(user_campus, list):
+                                campus_ids = [c.get('id') for c in user_campus if c]
+                                campus_match = campus_id in campus_ids
+                            elif isinstance(user_campus, dict):
+                                campus_match = user_campus.get('id') == campus_id
+                            
+                            if campus_match:
+                                user['location_active'] = False
+                                user['activity_date'] = activity_date
+                                filtered_users.append(user)
+                    
+                    method_users.extend(filtered_users)
+                    
+                    if debug_mode:
+                        st.info(f"✅ Método {method_idx + 1}, página {page}: {len(filtered_users)} usuarios válidos de {len(data)} totales")
+                    
+                    # Si no hay más datos, parar
+                    if len(data) < DEFAULT_PAGE_SIZE:
+                        break
+                        
+                    page += 1
+                    
+                    # Actualizar progreso
+                    progress = 0.1 + (method_idx / len(endpoints_to_try)) * 0.6 + (page / max_pages) * 0.1
+                    progress_bar.progress(min(progress, 0.7))
+                    
+                elif response.status_code == 403:
+                    if debug_mode:
+                        st.warning(f"⚠️ Método {method_idx + 1}: Sin permisos para este endpoint")
+                    break
+                else:
+                    if debug_mode:
+                        st.warning(f"⚠️ Método {method_idx + 1}, página {page}: Error {response.status_code}")
+                    break
+                    
+            except Exception as e:
+                if debug_mode:
+                    st.error(f"❌ Error en método {method_idx + 1}, página {page}: {str(e)}")
+                break
+        
+        # Agregar usuarios únicos de este método
+        for user in method_users:
+            user_id = user.get('id')
+            # Evitar duplicados
+            if user_id and not any(u.get('id') == user_id for u in users):
+                users.append(user)
+        
+        status_text.text(f"✅ Método {method_idx + 1}: {len(method_users)} usuarios encontrados (Total: {len(users)})")
+        
+        if len(users) >= max_users:
+            break
+    
+    return users[:max_users]
+
+def get_users_by_locations(campus_id, headers, status_text, debug_mode=False):
+    """Obtener usuarios actualmente en el campus usando locations"""
+    users = []
+    
+    try:
+        status_text.text("🔍 Buscando usuarios actualmente en el campus...")
+        locations_url = f"{API_BASE_URL}/v2/campus/{campus_id}/locations?page[size]={DEFAULT_PAGE_SIZE}&filter[active]=true"
+        
+        response = requests.get(locations_url, headers=headers, timeout=20)
+        
+        if response.status_code == 200:
+            locations = response.json()
+            if locations:
+                status_text.text(f"✅ Encontradas {len(locations)} ubicaciones activas")
+                
+                for location in locations:
+                    if location.get('user') and location.get('end_at') is None:
+                        user_data = location['user']
+                        user_data['last_location'] = location.get('begin_at')
+                        user_data['location_active'] = True
+                        users.append(user_data)
+                
+                if debug_mode:
+                    st.success(f"✅ Encontrados {len(users)} usuarios en ubicaciones activas")
+            else:
+                if debug_mode:
+                    st.info("📭 No hay ubicaciones activas en este momento")
+        else:
+            if debug_mode:
+                st.warning(f"⚠️ Error obteniendo locations: {response.status_code}")
+                
+    except Exception as e:
+        if debug_mode:
+            st.error(f"❌ Error obteniendo locations: {str(e)}")
+    
+    return users
+
+def get_active_users(campus_id, headers, days_back=1, max_users=100, search_method="Híbrido", debug_mode=False):
+    """Obtener usuarios activos usando múltiples enfoques mejorados"""
+    all_users = {}
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    try:
+        # Método 1: Usuarios actualmente en el campus (solo si está habilitado)
+        if search_method in ["Híbrido", "Solo ubicaciones activas"]:
+            location_users = get_users_by_locations(campus_id, headers, status_text, debug_mode)
+            
+            for user in location_users:
+                user_id = user.get('id')
+                if user_id:
+                    all_users[user_id] = user
+            
+            progress_bar.progress(0.3)
+            status_text.text(f"✅ Usuarios en campus: {len(location_users)}")
+        
+        # Método 2: Usuarios con actividad reciente (solo si está habilitado)
+        if search_method in ["Híbrido", "Solo actividad reciente"]:
+            activity_users = get_users_by_activity(
+                campus_id, headers, days_back, max_users, 
+                status_text, progress_bar, debug_mode
+            )
+            
+            for user in activity_users:
+                user_id = user.get('id')
+                if user_id and user_id not in all_users:
+                    all_users[user_id] = user
+            
+            progress_bar.progress(0.7)
+            status_text.text(f"✅ Usuarios con actividad reciente: {len(activity_users)}")
+        
+        final_users = list(all_users.values())[:max_users]
+        
+        # Obtener datos completos para usuarios seleccionados
+        progress_bar.progress(0.8)
+        status_text.text("🔍 Obteniendo datos completos de usuarios...")
+        
+        enhanced_users = []
+        detail_limit = min(DETAIL_LIMIT, len(final_users))  # Límite para evitar sobrecarga
+        
+        for i, user in enumerate(final_users):
+            if i < detail_limit:
+                detailed_user = get_user_details(user.get('id'), headers)
+                if detailed_user:
+                    # Preservar información de ubicación si existe
+                    if user.get('location_active'):
+                        detailed_user['location_active'] = True
+                        detailed_user['last_location'] = user.get('last_location')
+                    enhanced_users.append(detailed_user)
+                else:
+                    enhanced_users.append(user)
+            else:
+                enhanced_users.append(user)
+            
+            # Actualizar progreso
+            if i % 10 == 0:
+                progress = 0.8 + (i / len(final_users)) * 0.2
+                progress_bar.progress(min(progress, 1.0))
+        
+        progress_bar.progress(1.0)
+        status_text.text(f"✅ Completado: {len(enhanced_users)} usuarios procesados")
+        time.sleep(1)  # Mostrar el mensaje final brevemente
+        
+        return enhanced_users
+        
+    finally:
+        progress_bar.empty()
+        status_text.empty()
