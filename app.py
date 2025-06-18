@@ -68,11 +68,18 @@ client_secret = "TU_CLIENT_SECRET"
     
     # Configuración avanzada
     with st.expander("⚙️ Opciones Avanzadas"):
-        days_back = st.slider("Días hacia atrás", 1, 7, 1)
-        max_users = st.slider("Máximo de usuarios", 20, 200, 100)
+        days_back = st.slider("Días hacia atrás", 1, 30, 7)  # Aumenté el máximo a 30
+        max_users = st.slider("Máximo de usuarios", 20, 500, 200)  # Aumenté el límite
         show_raw_data = st.checkbox("Mostrar datos raw")
         show_charts = st.checkbox("Mostrar gráficos", value=True)
         debug_mode = st.checkbox("Modo debug", value=False)
+        
+        # Nueva opción para método de búsqueda
+        search_method = st.selectbox(
+            "Método de búsqueda",
+            ["Híbrido", "Solo actividad reciente", "Solo ubicaciones activas"],
+            help="Híbrido: combina ambos métodos para mejores resultados"
+        )
 
 # Obtener credenciales
 credentials = st.secrets.get("api42", {})
@@ -135,157 +142,270 @@ def get_user_details(user_id, headers):
             st.warning(f"Error obteniendo detalles de usuario {user_id}: {str(e)}")
         return None
 
-# Función para obtener usuarios activos
-def get_active_users(campus_id, headers, days_back=1, max_users=100):
-    """Obtener usuarios activos usando múltiples enfoques"""
+def handle_rate_limit(response, status_text, debug_mode=False):
+    """Manejar rate limiting de la API"""
+    if response.status_code == 429:
+        retry_after = int(response.headers.get('Retry-After', 2))
+        if debug_mode:
+            st.warning(f"⏳ Rate limit alcanzado - esperando {retry_after}s...")
+        status_text.text(f"⏳ Rate limit - esperando {retry_after}s...")
+        time.sleep(retry_after)
+        return True
+    return False
+
+def get_users_by_activity(campus_id, headers, days_back, max_users, status_text, progress_bar, debug_mode=False):
+    """Obtener usuarios con actividad reciente usando múltiples endpoints"""
     users = []
-    progress_bar = st.progress(0)
-    status_text = st.empty()
     
-    # Método 1: Intentar con locations (usuarios actualmente en el campus)
+    # Calcular fechas correctamente
+    now = datetime.now(timezone.utc)
+    past_date = now - timedelta(days=days_back)
+    
+    # Formatear fechas para la API (ISO 8601)
+    date_filter_start = past_date.strftime("%Y-%m-%dT%H:%M:%SZ")
+    date_filter_end = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    
+    if debug_mode:
+        st.info(f"🔍 Buscando actividad entre: {date_filter_start} y {date_filter_end}")
+    
+    status_text.text(f"🔍 Buscando usuarios con actividad reciente ({days_back} días)...")
+    
+    # Endpoints a probar con diferentes estrategias
+    endpoints_to_try = [
+        # Método 1: Filtrar por updated_at (actividad general)
+        f"https://api.intra.42.fr/v2/users?filter[campus_id]={campus_id}&range[updated_at]={date_filter_start},{date_filter_end}&sort=-updated_at",
+        
+        # Método 2: Filtrar por created_at para usuarios nuevos
+        f"https://api.intra.42.fr/v2/users?filter[campus_id]={campus_id}&range[created_at]={date_filter_start},{date_filter_end}&sort=-created_at",
+        
+        # Método 3: Campus específico con updated_at
+        f"https://api.intra.42.fr/v2/campus/{campus_id}/users?range[updated_at]={date_filter_start},{date_filter_end}&sort=-updated_at",
+        
+        # Método 4: Sin filtro de fecha pero ordenado por actividad
+        f"https://api.intra.42.fr/v2/campus/{campus_id}/users?sort=-updated_at",
+        
+        # Método 5: General sin filtros específicos
+        f"https://api.intra.42.fr/v2/users?filter[campus_id]={campus_id}&sort=-updated_at"
+    ]
+    
+    for method_idx, base_url in enumerate(endpoints_to_try):
+        if len(users) >= max_users:
+            break
+            
+        status_text.text(f"🔍 Método {method_idx + 1}/{len(endpoints_to_try)}: Probando endpoint...")
+        
+        page = 1
+        max_pages = min(10, (max_users // 100) + 1)
+        method_users = []
+        
+        while page <= max_pages and len(method_users) < max_users:
+            try:
+                # Construir URL con paginación
+                url = f"{base_url}&page[size]=100&page[number]={page}"
+                
+                if debug_mode:
+                    st.code(f"URL: {url}")
+                
+                response = requests.get(url, headers=headers, timeout=20)
+                
+                # Manejar rate limiting
+                if handle_rate_limit(response, status_text, debug_mode):
+                    continue
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    
+                    if not data:
+                        if debug_mode:
+                            st.info(f"📭 Método {method_idx + 1}, página {page}: Sin datos")
+                        break
+                    
+                    # Filtrar usuarios por fecha manualmente si la API no lo hizo
+                    filtered_users = []
+                    for user in data:
+                        # Verificar fecha de actividad
+                        user_updated = user.get('updated_at')
+                        user_created = user.get('created_at')
+                        
+                        # Parsear fechas
+                        activity_date = None
+                        for date_str in [user_updated, user_created]:
+                            if date_str:
+                                try:
+                                    activity_date = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                                    break
+                                except:
+                                    continue
+                        
+                        # Verificar si está en el rango de fechas
+                        if activity_date and activity_date >= past_date:
+                            # Verificar que pertenece al campus correcto
+                            user_campus = user.get('campus', [])
+                            campus_match = False
+                            
+                            if isinstance(user_campus, list):
+                                campus_ids = [c.get('id') for c in user_campus if c]
+                                campus_match = campus_id in campus_ids
+                            elif isinstance(user_campus, dict):
+                                campus_match = user_campus.get('id') == campus_id
+                            
+                            if campus_match:
+                                user['location_active'] = False
+                                user['activity_date'] = activity_date
+                                filtered_users.append(user)
+                    
+                    method_users.extend(filtered_users)
+                    
+                    if debug_mode:
+                        st.info(f"✅ Método {method_idx + 1}, página {page}: {len(filtered_users)} usuarios válidos de {len(data)} totales")
+                    
+                    # Si no hay más datos, parar
+                    if len(data) < 100:
+                        break
+                        
+                    page += 1
+                    
+                    # Actualizar progreso
+                    progress = 0.1 + (method_idx / len(endpoints_to_try)) * 0.6 + (page / max_pages) * 0.1
+                    progress_bar.progress(min(progress, 0.7))
+                    
+                elif response.status_code == 403:
+                    if debug_mode:
+                        st.warning(f"⚠️ Método {method_idx + 1}: Sin permisos para este endpoint")
+                    break
+                else:
+                    if debug_mode:
+                        st.warning(f"⚠️ Método {method_idx + 1}, página {page}: Error {response.status_code}")
+                    break
+                    
+            except Exception as e:
+                if debug_mode:
+                    st.error(f"❌ Error en método {method_idx + 1}, página {page}: {str(e)}")
+                break
+        
+        # Agregar usuarios únicos de este método
+        for user in method_users:
+            user_id = user.get('id')
+            # Evitar duplicados
+            if user_id and not any(u.get('id') == user_id for u in users):
+                users.append(user)
+        
+        status_text.text(f"✅ Método {method_idx + 1}: {len(method_users)} usuarios encontrados (Total: {len(users)})")
+        
+        if len(users) >= max_users:
+            break
+    
+    return users[:max_users]
+
+def get_users_by_locations(campus_id, headers, status_text, debug_mode=False):
+    """Obtener usuarios actualmente en el campus usando locations"""
+    users = []
+    
     try:
         status_text.text("🔍 Buscando usuarios actualmente en el campus...")
         locations_url = f"https://api.intra.42.fr/v2/campus/{campus_id}/locations?page[size]=100&filter[active]=true"
         
-        res = requests.get(locations_url, headers=headers, timeout=20)
-        if res.status_code == 200:
-            locations = res.json()
+        response = requests.get(locations_url, headers=headers, timeout=20)
+        
+        if response.status_code == 200:
+            locations = response.json()
             if locations:
                 status_text.text(f"✅ Encontradas {len(locations)} ubicaciones activas")
-                # Extraer usuarios de las ubicaciones activas
-                location_users = []
-                for i, location in enumerate(locations):
+                
+                for location in locations:
                     if location.get('user') and location.get('end_at') is None:
                         user_data = location['user']
                         user_data['last_location'] = location.get('begin_at')
                         user_data['location_active'] = True
-                        location_users.append(user_data)
-                    
-                    # Actualizar progreso
-                    if i % 10 == 0:
-                        progress_bar.progress(0.3 * (i / len(locations)))
+                        users.append(user_data)
                 
-                if location_users:
-                    users.extend(location_users)
-                    status_text.text(f"✅ Encontrados {len(location_users)} usuarios en ubicaciones activas")
-                    
+                if debug_mode:
+                    st.success(f"✅ Encontrados {len(users)} usuarios en ubicaciones activas")
+            else:
+                if debug_mode:
+                    st.info("📭 No hay ubicaciones activas en este momento")
+        else:
+            if debug_mode:
+                st.warning(f"⚠️ Error obteniendo locations: {response.status_code}")
+                
     except Exception as e:
-        st.warning(f"⚠️ Error obteniendo locations: {str(e)}")
+        if debug_mode:
+            st.error(f"❌ Error obteniendo locations: {str(e)}")
     
-    progress_bar.progress(0.4)
-    
-    # Método 2: Buscar usuarios con actividad reciente
-    status_text.text("🔍 Buscando usuarios con actividad reciente...")
-    page = 1
-    
-    # Fixed datetime handling - use timezone.utc instead of datetime.UTC
-    now = datetime.now(timezone.utc)
-    past_date = now - timedelta(days=days_back)
-    date_filter = past_date.strftime("%Y-%m-%dT%H:%M:%SZ")
-    
-    max_pages = min(10, max_users // 100 + 1)
-    recent_users = []
-    
-    while page <= max_pages and len(recent_users) < max_users:
-        try:
-            status_text.text(f"Cargando página {page} de usuarios recientes...")
-            
-            # Usar diferentes endpoints según disponibilidad
-            urls_to_try = [
-                f"https://api.intra.42.fr/v2/campus/{campus_id}/users?page[size]=100&page[number]={page}&sort=-updated_at&filter[updated_at]={date_filter},",
-                f"https://api.intra.42.fr/v2/campus/{campus_id}/users?page[size]=100&page[number]={page}&sort=-updated_at",
-                f"https://api.intra.42.fr/v2/users?page[size]=100&page[number]={page}&sort=-updated_at&filter[campus_id]={campus_id}"
-            ]
-            
-            success = False
-            for url in urls_to_try:
-                try:
-                    res = requests.get(url, headers=headers, timeout=20)
-                    
-                    if res.status_code == 200:
-                        data = res.json()
-                        if data:
-                            # Filtrar por campus si es necesario
-                            filtered_data = []
-                            for user in data:
-                                user_campus = user.get('campus', [])
-                                if isinstance(user_campus, list):
-                                    campus_ids = [c.get('id') for c in user_campus]
-                                    if campus_id in campus_ids:
-                                        user['location_active'] = False
-                                        filtered_data.append(user)
-                                elif isinstance(user_campus, dict) and user_campus.get('id') == campus_id:
-                                    user['location_active'] = False
-                                    filtered_data.append(user)
-                            
-                            recent_users.extend(filtered_data)
-                            success = True
-                            break
-                            
-                    elif res.status_code == 429:
-                        retry_after = int(res.headers.get('Retry-After', 2))
-                        status_text.text(f"⏳ Rate limit - esperando {retry_after}s...")
-                        time.sleep(retry_after)
-                        
-                except Exception as e:
-                    if debug_mode:
-                        st.warning(f"Error con URL {url}: {str(e)}")
-                    continue
-            
-            if not success:
-                break
-                
-            page += 1
-            
-            # Actualizar progreso
-            progress = 0.4 + (page / max_pages) * 0.4
-            progress_bar.progress(min(progress, 0.8))
-            
-        except Exception as e:
-            st.error(f"❌ Error en página {page}: {str(e)}")
-            break
-    
-    # Combinar usuarios únicos
+    return users
+
+# Función principal mejorada para obtener usuarios activos
+def get_active_users(campus_id, headers, days_back=1, max_users=100, search_method="Híbrido"):
+    """Obtener usuarios activos usando múltiples enfoques mejorados"""
     all_users = {}
+    progress_bar = st.progress(0)
+    status_text = st.empty()
     
-    # Agregar usuarios de locations (prioridad)
-    for user in users:
-        user_id = user.get('id')
-        if user_id:
-            all_users[user_id] = user
-    
-    # Agregar usuarios recientes
-    for user in recent_users:
-        user_id = user.get('id')
-        if user_id and user_id not in all_users:
-            all_users[user_id] = user
-    
-    final_users = list(all_users.values())[:max_users]
-    
-    progress_bar.progress(0.9)
-    status_text.text("🔍 Obteniendo datos completos de usuarios...")
-    
-    # Obtener datos completos para algunos usuarios (especialmente para niveles)
-    enhanced_users = []
-    for i, user in enumerate(final_users):
-        if i < min(20, len(final_users)):  # Solo para los primeros 20 para no sobrecargar
-            detailed_user = get_user_details(user.get('id'), headers)
-            if detailed_user:
-                enhanced_users.append(detailed_user)
+    try:
+        # Método 1: Usuarios actualmente en el campus (solo si está habilitado)
+        if search_method in ["Híbrido", "Solo ubicaciones activas"]:
+            location_users = get_users_by_locations(campus_id, headers, status_text, debug_mode)
+            
+            for user in location_users:
+                user_id = user.get('id')
+                if user_id:
+                    all_users[user_id] = user
+            
+            progress_bar.progress(0.3)
+            status_text.text(f"✅ Usuarios en campus: {len(location_users)}")
+        
+        # Método 2: Usuarios con actividad reciente (solo si está habilitado)
+        if search_method in ["Híbrido", "Solo actividad reciente"]:
+            activity_users = get_users_by_activity(
+                campus_id, headers, days_back, max_users, 
+                status_text, progress_bar, debug_mode
+            )
+            
+            for user in activity_users:
+                user_id = user.get('id')
+                if user_id and user_id not in all_users:
+                    all_users[user_id] = user
+            
+            progress_bar.progress(0.7)
+            status_text.text(f"✅ Usuarios con actividad reciente: {len(activity_users)}")
+        
+        final_users = list(all_users.values())[:max_users]
+        
+        # Obtener datos completos para usuarios seleccionados
+        progress_bar.progress(0.8)
+        status_text.text("🔍 Obteniendo datos completos de usuarios...")
+        
+        enhanced_users = []
+        detail_limit = min(50, len(final_users))  # Límite para evitar sobrecarga
+        
+        for i, user in enumerate(final_users):
+            if i < detail_limit:
+                detailed_user = get_user_details(user.get('id'), headers)
+                if detailed_user:
+                    # Preservar información de ubicación si existe
+                    if user.get('location_active'):
+                        detailed_user['location_active'] = True
+                        detailed_user['last_location'] = user.get('last_location')
+                    enhanced_users.append(detailed_user)
+                else:
+                    enhanced_users.append(user)
             else:
                 enhanced_users.append(user)
-        else:
-            enhanced_users.append(user)
+            
+            # Actualizar progreso
+            if i % 10 == 0:
+                progress = 0.8 + (i / len(final_users)) * 0.2
+                progress_bar.progress(min(progress, 1.0))
         
-        # Actualizar progreso
-        if i % 5 == 0:
-            progress = 0.9 + (i / len(final_users)) * 0.1
-            progress_bar.progress(min(progress, 1.0))
-    
-    progress_bar.empty()
-    status_text.empty()
-    
-    return enhanced_users
+        progress_bar.progress(1.0)
+        status_text.text(f"✅ Completado: {len(enhanced_users)} usuarios procesados")
+        time.sleep(1)  # Mostrar el mensaje final brevemente
+        
+        return enhanced_users
+        
+    finally:
+        progress_bar.empty()
+        status_text.empty()
 
 # Auto-refresh logic
 if auto_refresh:
@@ -328,7 +448,7 @@ if selected_campus:
 # Trigger para cargar datos
 if refresh_button or (auto_refresh and 'users_data' not in st.session_state):
     with st.spinner(f"🔍 Cargando usuarios activos de {selected_campus}..."):
-        users = get_active_users(campus_id, headers, days_back, max_users)
+        users = get_active_users(campus_id, headers, days_back, max_users, search_method)
         
         if not users:
             st.info(f"📝 No se encontraron usuarios activos en {selected_campus} en los últimos {days_back} día(s).")
@@ -338,8 +458,26 @@ if refresh_button or (auto_refresh and 'users_data' not in st.session_state):
             df_data = []
             for user in users:
                 try:
-                    # Determinar la fecha de última actividad
-                    last_activity = user.get("last_location") or user.get("updated_at") or user.get("created_at")
+                    # Determinar la fecha de última actividad con prioridad
+                    last_activity = None
+                    activity_sources = [
+                        user.get("last_location"),  # Ubicación más reciente
+                        user.get("updated_at"),     # Última actualización
+                        user.get("created_at")      # Creación (fallback)
+                    ]
+                    
+                    for activity_time in activity_sources:
+                        if activity_time:
+                            try:
+                                if isinstance(activity_time, str):
+                                    # Manejar diferentes formatos de fecha
+                                    if activity_time.endswith('Z'):
+                                        last_activity = activity_time
+                                    else:
+                                        last_activity = activity_time
+                                    break
+                            except:
+                                continue
                     
                     user_info = {
                         "ID": user.get("id", 0),
@@ -388,12 +526,40 @@ if refresh_button or (auto_refresh and 'users_data' not in st.session_state):
             
             df = pd.DataFrame(df_data)
             
-            # Procesar timestamps
+            # Procesar timestamps con mejor manejo de errores
             if not df.empty:
-                df["Última conexión"] = pd.to_datetime(df["Última conexión"], errors='coerce').dt.tz_localize(None)
+                # Función para parsear fechas de manera robusta
+                def parse_date(date_str):
+                    if pd.isna(date_str) or date_str in [None, "", "N/A"]:
+                        return pd.NaT
+                    
+                    try:
+                        # Intentar parsear como ISO format
+                        if isinstance(date_str, str):
+                            if date_str.endswith('Z'):
+                                return pd.to_datetime(date_str, utc=True).tz_localize(None)
+                            else:
+                                return pd.to_datetime(date_str, utc=True).tz_localize(None)
+                        return pd.to_datetime(date_str, utc=True).tz_localize(None)
+                    except:
+                        return pd.NaT
                 
-                # Filtrar usuarios con datos válidos
+                df["Última conexión"] = df["Última conexión"].apply(parse_date)
+                
+                # Filtrar usuarios con fechas válidas
                 df = df.dropna(subset=["Última conexión"])
+                
+                # Filtrar por rango de fechas especificado
+                if len(df) > 0:
+                    now = datetime.now(timezone.utc).replace(tzinfo=None)
+                    past_date = now - timedelta(days=days_back)
+                    
+                    # Filtrar usuarios dentro del rango
+                    date_mask = df["Última conexión"] >= past_date
+                    df = df[date_mask]
+                    
+                    if debug_mode:
+                        st.info(f"🔍 Filtro de fecha: {len(df)} usuarios con actividad desde {past_date.strftime('%Y-%m-%d %H:%M')}")
                 
                 # Ordenar por última conexión
                 df = df.sort_values("Última conexión", ascending=False)
@@ -409,8 +575,12 @@ if refresh_button or (auto_refresh and 'users_data' not in st.session_state):
             st.session_state.last_update = datetime.now()
             st.session_state.selected_campus = selected_campus
             st.session_state.days_back = days_back
+            st.session_state.search_method = search_method
             
-            st.success(f"✅ Usuarios activos en {selected_campus} (últimos {days_back} día(s)): **{len(df)}**")
+            if len(df) > 0:
+                st.success(f"✅ Usuarios activos en {selected_campus} (últimos {days_back} día(s)): **{len(df)}**")
+            else:
+                st.warning(f"⚠️ No se encontraron usuarios con actividad en {selected_campus} en los últimos {days_back} día(s). Prueba aumentar el rango de días o cambiar el método de búsqueda.")
 
 # Mostrar datos si están disponibles
 if 'users_data' in st.session_state and not st.session_state.users_data.empty:
@@ -423,17 +593,14 @@ if 'users_data' in st.session_state and not st.session_state.users_data.empty:
         st.metric("👥 Usuarios Activos", len(df))
     
     with col2:
-        # Usuarios únicos por login
         unique_users = df['Login'].nunique()
         st.metric("👤 Usuarios Únicos", unique_users)
     
     with col3:
-        # Promedio de nivel
         avg_level = df['Nivel'].mean()
         st.metric("📊 Nivel Promedio", f"{avg_level:.1f}")
     
     with col4:
-        # Última actualización
         if 'last_update' in st.session_state:
             last_update = st.session_state.last_update.strftime("%H:%M:%S")
             st.metric("🕒 Actualizado", last_update)
@@ -450,18 +617,18 @@ if 'users_data' in st.session_state and not st.session_state.users_data.empty:
         st.metric("🏆 Nivel Máximo", f"{max_level:.1f}")
     
     with col3:
-        # Fixed: Check if Wallet column exists and has valid data
         if 'Wallet' in df.columns and not df['Wallet'].isna().all():
             avg_wallet = df['Wallet'].mean()
             st.metric("💰 Wallet Promedio", f"{avg_wallet:.0f}")
         else:
             st.metric("💰 Wallet Promedio", "N/A")
     
-    # Información temporal
+    # Información temporal mejorada
     if not df.empty:
         fecha_min = df['Última conexión'].min().strftime("%d/%m/%Y %H:%M")
         fecha_max = df['Última conexión'].max().strftime("%d/%m/%Y %H:%M")
-        st.info(f"📅 **Período de actividad:** {fecha_min} → {fecha_max} | **Campus:** {st.session_state.get('selected_campus', 'N/A')}")
+        search_method_used = st.session_state.get('search_method', 'N/A')
+        st.info(f"📅 **Período de actividad:** {fecha_min} → {fecha_max} | **Campus:** {st.session_state.get('selected_campus', 'N/A')} | **Método:** {search_method_used}")
     
     # Gráficos (si están habilitados)
     if show_charts and len(df) > 0:
@@ -490,6 +657,31 @@ if 'users_data' in st.session_state and not st.session_state.users_data.empty:
             
             st.plotly_chart(chart, use_container_width=True)
         
+        # Actividad por día
+        if days_back > 1:
+            st.markdown("## 📊 Actividad por Día")
+            
+            df_chart = df.copy()
+            df_chart['fecha'] = df_chart['Última conexión'].dt.date
+            daily_counts = df_chart['fecha'].value_counts().sort_index()
+            
+            if not daily_counts.empty:
+                chart_daily = px.line(
+                    x=daily_counts.index, 
+                    y=daily_counts.values,
+                    labels={"x": "Fecha", "y": "Usuarios Activos"},
+                    title=f"Tendencia de Actividad - Últimos {days_back} días"
+                )
+                
+                chart_daily.update_traces(line_color='rgba(102, 126, 234, 0.8)', line_width=3)
+                chart_daily.update_layout(
+                    height=300,
+                    showlegend=False,
+                    plot_bgcolor='white'
+                )
+                
+                st.plotly_chart(chart_daily, use_container_width=True)
+        
         # Distribución de niveles mejorada
         st.markdown("## 📊 Distribución de Niveles")
         
@@ -512,7 +704,6 @@ if 'users_data' in st.session_state and not st.session_state.users_data.empty:
             # Top usuarios por nivel
             if len(df) > 0:
                 st.markdown("### 🏆 Top 10 Usuarios por Nivel")
-                # Select columns that exist in the dataframe
                 columns_to_show = ['Login', 'Nombre', 'Nivel']
                 if 'Wallet' in df.columns:
                     columns_to_show.append('Wallet')
@@ -595,6 +786,39 @@ if 'users_data' in st.session_state and not st.session_state.users_data.empty:
     
     st.info(f"📊 Mostrando {len(filtered_df)} de {len(df)} usuarios")
     
+    # Información de depuración
+    if debug_mode:
+        st.markdown("## 🐛 Información de Depuración")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("### ⚙️ Configuración Actual")
+            st.json({
+                "campus_id": campus_id,
+                "selected_campus": selected_campus,
+                "days_back": st.session_state.get('days_back', days_back),
+                "max_users": max_users,
+                "search_method": st.session_state.get('search_method', search_method),
+                "total_users_found": len(df),
+                "date_range": {
+                    "start": (datetime.now(timezone.utc) - timedelta(days=days_back)).strftime("%Y-%m-%d %H:%M:%S"),
+                    "end": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+                }
+            })
+        
+        with col2:
+            st.markdown("### 📊 Estadísticas de Datos")
+            if not df.empty:
+                st.json({
+                    "users_in_campus": len(df[df['Estado'].str.contains('En campus')]),
+                    "users_recently_active": len(df[df['Estado'].str.contains('Activo recientemente')]),
+                    "earliest_activity": df['Última conexión'].min().strftime('%Y-%m-%d %H:%M:%S'),
+                    "latest_activity": df['Última conexión'].max().strftime('%Y-%m-%d %H:%M:%S'),
+                    "avg_level": round(df['Nivel'].mean(), 2),
+                    "max_level": round(df['Nivel'].max(), 2)
+                })
+    
     # Datos raw si están habilitados
     if show_raw_data and 'users_raw' in st.session_state:
         st.markdown("## 🔍 Datos Raw (Primeros 3 registros)")
@@ -614,11 +838,16 @@ else:
         - 💰 **Métricas:** Wallet, puntos de evaluación y más
         
         **Funcionalidades mejoradas:**
-        - ✅ **Obtención de niveles:** Datos completos del cursus 42
-        - ✅ **Filtros avanzados:** Por estado, nivel mínimo y búsqueda
-        - ✅ **Métricas extendidas:** Wallet, puntos de evaluación
-        - ✅ **Visualizaciones mejoradas:** Histogramas y distribuciones
-        - ✅ **Modo debug:** Para diagnosticar problemas
+        - ✅ **Filtrado de fechas corregido:** Ahora respeta correctamente el rango de días seleccionado
+        - ✅ **Múltiples métodos de búsqueda:** Híbrido, solo actividad reciente, solo ubicaciones activas
+        - ✅ **Mejor manejo de fechas:** Parseo robusto de timestamps de la API
+        - ✅ **Modo debug mejorado:** Información detallada sobre el proceso de búsqueda
+        - ✅ **Filtros de fecha manuales:** Verificación adicional por si la API no filtra correctamente
+        
+        **Métodos de búsqueda:**
+        - **Híbrido:** Combina usuarios en campus + actividad reciente (recomendado)
+        - **Solo actividad reciente:** Busca usuarios con actividad en el período especificado
+        - **Solo ubicaciones activas:** Solo usuarios actualmente en el campus
         
         **Configuración de credenciales:**
         ```toml
@@ -626,16 +855,23 @@ else:
         client_id = "tu_client_id"
         client_secret = "tu_client_secret"
         ```
+        
+        **Solución de problemas:**
+        - Si no aparecen usuarios, prueba aumentar el rango de días
+        - Activa el modo debug para ver información detallada del proceso
+        - Prueba diferentes métodos de búsqueda si uno no funciona bien
         """)
 
-# Footer
+# Footer mejorado
 st.markdown("---")
 campus_name = st.session_state.get('selected_campus', 'Ninguno')
 days = st.session_state.get('days_back', days_back)
+method = st.session_state.get('search_method', search_method)
 st.markdown(
-    f"💡 **42 Network Dashboard v2.1** | "
+    f"💡 **42 Network Dashboard v2.2** | "
     f"Campus: {campus_name} | "
     f"Período: {days} día(s) | "
+    f"Método: {method} | "
     f"🔄 Auto-actualizar: {'✅' if auto_refresh else '❌'} | "
     f"🐛 Debug: {'✅' if debug_mode else '❌'}"
 )
