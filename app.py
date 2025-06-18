@@ -72,19 +72,67 @@ def get_auth_token(client_id, client_secret):
         st.error(f"❌ Error de conexión: {str(e)}")
         return None
 
-# Función para obtener campus
+# Función para obtener campus con paginación mejorada
 @st.cache_data(ttl=3600)
-def get_campus(headers):
-    """Obtener lista de campus"""
+def get_campus(headers, debug_mode=False):
+    """Obtener lista completa de campus con paginación"""
+    all_campus = []
+    page = 1
+    max_pages = 20  # Límite de seguridad
+    
     try:
-        res = requests.get("https://api.intra.42.fr/v2/campus", headers=headers, timeout=10)
-        if res.status_code == 200:
-            return res.json()
-        else:
-            st.error(f"❌ Error al obtener campus: {res.status_code}")
-            return []
+        while page <= max_pages:
+            # Usar paginación para obtener todos los campus
+            url = f"https://api.intra.42.fr/v2/campus?page[size]=100&page[number]={page}"
+            
+            if debug_mode:
+                st.write(f"🔍 Obteniendo campus - Página {page}: {url}")
+            
+            res = requests.get(url, headers=headers, timeout=15)
+            
+            if res.status_code == 200:
+                data = res.json()
+                
+                if not data:  # No hay más datos
+                    break
+                
+                all_campus.extend(data)
+                
+                if debug_mode:
+                    st.write(f"✅ Página {page}: {len(data)} campus encontrados")
+                
+                # Si obtenemos menos de 100, probablemente es la última página
+                if len(data) < 100:
+                    break
+                    
+                page += 1
+            else:
+                if debug_mode:
+                    st.error(f"❌ Error en página {page}: {res.status_code}")
+                break
+        
+        if debug_mode:
+            st.success(f"✅ Total campus obtenidos: {len(all_campus)}")
+            
+            # Mostrar campus por país para debug
+            campus_by_country_debug = {}
+            for campus in all_campus:
+                country = campus.get("country", "Sin País")
+                if country not in campus_by_country_debug:
+                    campus_by_country_debug[country] = []
+                campus_by_country_debug[country].append(campus.get("name", "Sin nombre"))
+            
+            st.write("📍 Campus por país encontrados:")
+            for country, campus_names in sorted(campus_by_country_debug.items()):
+                st.write(f"**{country}:** {len(campus_names)} campus")
+                if country == "Spain":  # Mostrar detalles de España
+                    for name in sorted(campus_names):
+                        st.write(f"  - {name}")
+        
+        return all_campus
+        
     except Exception as e:
-        st.error(f"❌ Error: {str(e)}")
+        st.error(f"❌ Error obteniendo campus: {str(e)}")
         return []
 
 # Función para obtener datos completos de un usuario
@@ -392,7 +440,11 @@ client_secret = "TU_CLIENT_SECRET"
     token = get_auth_token(client_id, client_secret)
     if token:
         headers = {"Authorization": f"Bearer {token}"}
-        campus_list = get_campus(headers)
+        
+        # Obtener debug_mode del estado si existe
+        debug_mode_for_campus = st.session_state.get('debug_mode_campus', False)
+        
+        campus_list = get_campus(headers, debug_mode_for_campus)
         
         if campus_list:
             # Crear diccionarios organizados por país
