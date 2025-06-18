@@ -1,51 +1,15 @@
+# ui/charts.py
+
 import streamlit as st
 import plotly.express as px
-import pandas as pd
+import plotly.graph_objects as go
 
-
-def render_metrics(df):
-    """Renderiza las métricas principales"""
-    col1, col2, col3, col4 = st.columns(4)
+def render_charts(df, days_back, selected_campus):
+    """Renderizar todos los gráficos"""
+    if len(df) == 0:
+        return
     
-    with col1:
-        st.metric("👥 Usuarios Activos", len(df))
-    
-    with col2:
-        unique_users = df['Login'].nunique()
-        st.metric("👤 Usuarios Únicos", unique_users)
-    
-    with col3:
-        avg_level = df['Nivel'].mean()
-        st.metric("📊 Nivel Promedio", f"{avg_level:.1f}")
-    
-    with col4:
-        if 'last_update' in st.session_state:
-            last_update = st.session_state.last_update.strftime("%H:%M:%S")
-            st.metric("🕒 Actualizado", last_update)
-
-
-def render_additional_metrics(df):
-    """Renderiza métricas adicionales"""
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        users_in_campus = len(df[df['Estado'].str.contains('En campus')])
-        st.metric("🟢 En Campus", users_in_campus)
-    
-    with col2:
-        max_level = df['Nivel'].max()
-        st.metric("🏆 Nivel Máximo", f"{max_level:.1f}")
-    
-    with col3:
-        if 'Wallet' in df.columns and not df['Wallet'].isna().all():
-            avg_wallet = df['Wallet'].mean()
-            st.metric("💰 Wallet Promedio", f"{avg_wallet:.0f}")
-        else:
-            st.metric("💰 Wallet Promedio", "N/A")
-
-
-def render_activity_by_hour(df):
-    """Renderiza el gráfico de actividad por hora"""
+    # Actividad por hora del día
     st.markdown("## 📈 Actividad por Hora del Día")
     
     df_chart = df.copy()
@@ -57,7 +21,7 @@ def render_activity_by_hour(df):
             x=counts.index, 
             y=counts.values, 
             labels={"x": "Hora del Día", "y": "Usuarios Activos"}, 
-            title=f"Distribución de Actividad - {st.session_state.get('selected_campus', 'Campus')}"
+            title=f"Distribución de Actividad - {selected_campus}"
         )
         
         chart.update_traces(marker_color='rgba(102, 126, 234, 0.8)')
@@ -69,10 +33,8 @@ def render_activity_by_hour(df):
         )
         
         st.plotly_chart(chart, use_container_width=True)
-
-
-def render_activity_by_day(df, days_back):
-    """Renderiza el gráfico de actividad por día"""
+    
+    # Actividad por día
     if days_back > 1:
         st.markdown("## 📊 Actividad por Día")
         
@@ -96,10 +58,8 @@ def render_activity_by_day(df, days_back):
             )
             
             st.plotly_chart(chart_daily, use_container_width=True)
-
-
-def render_level_distribution(df):
-    """Renderiza la distribución de niveles y top usuarios"""
+    
+    # Distribución de niveles mejorada
     st.markdown("## 📊 Distribución de Niveles")
     
     col1, col2 = st.columns(2)
@@ -155,31 +115,3 @@ def render_level_distribution(df):
                 )
             else:
                 st.info("No hay usuarios con niveles para mostrar")
-
-
-def render_temporal_info(df, selected_country, search_method_used):
-    """Renderiza información temporal"""
-    if not df.empty:
-        fecha_min = df['Última conexión'].min().strftime("%d/%m/%Y %H:%M")
-        fecha_max = df['Última conexión'].max().strftime("%d/%m/%Y %H:%M")
-        country_info = f" | **País:** {selected_country}" if selected_country != "Todos" else ""
-        st.info(f"📅 **Período de actividad:** {fecha_min} → {fecha_max} | **Campus:** {st.session_state.get('selected_campus', 'N/A')}{country_info} | **Método:** {search_method_used}")
-
-
-def render_all_charts(df, days_back, selected_country, search_method_used):
-    """Renderiza todos los gráficos y métricas"""
-    # Métricas principales
-    render_metrics(df)
-    
-    # Métricas adicionales
-    render_additional_metrics(df)
-    
-    # Información temporal
-    render_temporal_info(df, selected_country, search_method_used)
-    
-    # Gráficos de actividad
-    render_activity_by_hour(df)
-    render_activity_by_day(df, days_back)
-    
-    # Distribución de niveles
-    render_level_distribution(df)
