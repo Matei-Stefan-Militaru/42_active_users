@@ -1,4 +1,4 @@
-'auto_load': auto_load,# ui/sidebar.py
+# ui/sidebar.py
 
 import streamlit as st
 from api.auth import get_auth_token
