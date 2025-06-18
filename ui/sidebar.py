@@ -76,9 +76,18 @@ def render_sidebar():
             debug_mode_campus = st.checkbox("Debug campus", value=False, help="Muestra información detallada sobre la carga de campus")
             st.session_state.debug_mode_campus = debug_mode_campus
             
+            # Opción para problemas SSL
+            bypass_ssl = st.checkbox("🔧 Bypass SSL (si hay errores 526)", value=False, help="Usar solo si hay problemas de conexión SSL")
+            
             # Método de búsqueda fijo en "Solo ubicaciones activas"
             search_method = "Solo ubicaciones activas"
             st.info("🔍 **Modo:** Solo usuarios actualmente en el campus")
+            
+            # Botón para limpiar cache si hay problemas
+            if st.button("🗑️ Limpiar Cache", help="Limpiar cache de autenticación"):
+                st.cache_data.clear()
+                st.success("✅ Cache limpiado")
+                st.rerun()
             
             # Botón para recargar campus
             if st.button("🔄 Recargar Campus", help="Fuerza la recarga de la lista de campus"):
