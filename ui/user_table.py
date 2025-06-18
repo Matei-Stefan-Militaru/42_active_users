@@ -17,55 +17,56 @@ def safe_format_date(date_val):
 
 def render_metrics(df):
     """Renderizar las métricas principales"""
-    # Métricas principales
-    col1, col2, col3, col4 = st.columns(4)
+    # Métricas principales en 6 columnas más compactas
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
     
     with col1:
-        st.metric("👥 Usuarios Activos", len(df))
+        st.metric("👥", len(df), label_visibility="collapsed")
     
     with col2:
         unique_users = df['Login'].nunique()
-        st.metric("👤 Usuarios Únicos", unique_users)
+        st.metric("👤", unique_users, label_visibility="collapsed")
     
     with col3:
         avg_level = df['Nivel'].mean()
-        st.metric("📊 Nivel Promedio", f"{avg_level:.1f}")
+        st.metric("📊", f"{avg_level:.1f}", label_visibility="collapsed")
     
     with col4:
-        if 'last_update' in st.session_state:
-            last_update = st.session_state.last_update.strftime("%H:%M:%S")
-            st.metric("🕒 Actualizado", last_update)
-    
-    # Métricas adicionales
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
         users_in_campus = len(df[df['Estado'].str.contains('En campus')])
-        st.metric("🟢 En Campus", users_in_campus)
+        st.metric("🟢", users_in_campus, label_visibility="collapsed")
     
-    with col2:
+    with col5:
         max_level = df['Nivel'].max()
-        st.metric("🏆 Nivel Máximo", f"{max_level:.1f}")
+        st.metric("🏆", f"{max_level:.1f}", label_visibility="collapsed")
     
-    with col3:
-        if 'Wallet' in df.columns and not df['Wallet'].isna().all():
-            avg_wallet = df['Wallet'].mean()
-            st.metric("💰 Wallet Promedio", f"{avg_wallet:.0f}")
+    with col6:
+        if 'last_update' in st.session_state:
+            last_update = st.session_state.last_update.strftime("%H:%M")
+            st.metric("🕒", last_update, label_visibility="collapsed")
         else:
-            st.metric("💰 Wallet Promedio", "N/A")
+            if 'Wallet' in df.columns and not df['Wallet'].isna().all():
+                avg_wallet = df['Wallet'].mean()
+                st.metric("💰", f"{avg_wallet:.0f}", label_visibility="collapsed")
+            else:
+                st.metric("💰", "N/A", label_visibility="collapsed")
+                
+    # Leyenda pequeña debajo
+    st.caption("👥 Activos | 👤 Únicos | 📊 Nivel ⌀ | 🟢 En Campus | 🏆 Max | 🕒 Update")
 
 def render_user_table(df):
     """Renderizar la tabla de usuarios con filtros"""
-    st.markdown("## 👥 Lista de Usuarios Activos")
+    st.markdown("#### 👥 Users")
     
-    # Filtros
-    col1, col2, col3 = st.columns(3)
+    # Filtros en una sola fila más compacta
+    col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
     with col1:
-        search_user = st.text_input("🔍 Buscar por login/nombre", placeholder="Escribe aquí...")
+        search_user = st.text_input("Search", placeholder="login...", label_visibility="collapsed")
     with col2:
-        min_level = st.number_input("📊 Nivel mínimo", min_value=0.0, max_value=50.0, value=0.0, step=0.1)
+        min_level = st.number_input("Min", min_value=0.0, max_value=50.0, value=0.0, step=1.0, label_visibility="collapsed")
     with col3:
-        status_filter = st.selectbox("📍 Estado", ["Todos", "🟢 En campus", "🔵 Activo recientemente"])
+        status_filter = st.selectbox("Status", ["All", "🟢", "🔵"], label_visibility="collapsed")
+    with col4:
+        st.write("")  # Espacio para alineación
     
     # Aplicar filtros
     filtered_df = df.copy()
@@ -78,39 +79,43 @@ def render_user_table(df):
     if min_level > 0:
         filtered_df = filtered_df[filtered_df['Nivel'] >= min_level]
     
-    if status_filter != "Todos":
-        filtered_df = filtered_df[filtered_df['Estado'] == status_filter]
+    if status_filter != "All":
+        if status_filter == "🟢":
+            filtered_df = filtered_df[filtered_df['Estado'].str.contains('En campus')]
+        elif status_filter == "🔵":
+            filtered_df = filtered_df[~filtered_df['Estado'].str.contains('En campus')]
     
-    # Formatear para mostrar - only include columns that exist
-    base_columns = ['Login', 'Nombre', 'Estado', 'Nivel', 'Última conexión']
-    display_columns = base_columns.copy()
+    # Formatear para mostrar - solo columnas esenciales
+    display_columns = ['Login', 'Estado', 'Ubicación', 'Nivel']
     
-    # Add optional columns if they exist
+    # Add wallet si existe
     if 'Wallet' in filtered_df.columns:
-        display_columns.insert(-1, 'Wallet')  # Insert before 'Última conexión'
-    if 'Evaluation Points' in filtered_df.columns:
-        display_columns.insert(-1, 'Evaluation Points')
+        display_columns.append('Wallet')
     
     display_df = filtered_df[display_columns].copy()
     
-    # Formatear datos
-    display_df['Última conexión'] = display_df['Última conexión'].apply(safe_format_date)
+    # Formatear datos de manera más compacta
+    display_df['Estado'] = display_df['Estado'].apply(lambda x: "🟢" if "En campus" in x else "🔵")
     display_df['Nivel'] = display_df['Nivel'].apply(lambda x: f"{x:.1f}")
+    display_df['Ubicación'] = display_df['Ubicación'].apply(lambda x: x if x != "N/A" else "—")
     
-    # Format optional columns if they exist
+    # Acortar logins largos
+    display_df['Login'] = display_df['Login'].apply(
+        lambda x: x[:15] + "..." if len(str(x)) > 15 else str(x)
+    )
+    
+    # Format wallet si existe
     if 'Wallet' in display_df.columns:
         display_df['Wallet'] = display_df['Wallet'].apply(lambda x: f"{x:.0f}")
-    if 'Evaluation Points' in display_df.columns:
-        display_df['Evaluation Points'] = display_df['Evaluation Points'].apply(lambda x: f"{x:.0f}")
     
     st.dataframe(
         display_df,
         use_container_width=True,
-        height=400,
+        height=300,
         hide_index=True
     )
     
-    st.info(f"📊 Mostrando {len(filtered_df)} de {len(df)} usuarios")
+    st.caption(f"{len(filtered_df)} of {len(df)} users")
 
 def render_raw_data():
     """Renderizar datos raw si están habilitados"""
