@@ -586,10 +586,6 @@ def get_active_users(campus_id, headers, days_back=1, max_users=100, search_meth
         time.sleep(1)  # Mostrar el mensaje final brevemente
         
         return enhanced_users
-        
-    finally:
-        progress_bar.empty()
-        status_text.empty()
 
 # Auto-refresh logic
 if auto_refresh:
