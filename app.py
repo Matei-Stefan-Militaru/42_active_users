@@ -18,127 +18,90 @@ MAIN_CSS = """
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
-        font-size: 0.9rem;
+        font-size: 1.4rem;
         font-weight: bold;
         text-align: center;
-        margin-bottom: 0.1rem;
+        margin-bottom: 0.3rem;
     }
     .status-success { 
         background: #e8f5e8; 
-        border-left: 1px solid #4caf50; 
-        padding: 2px; 
-        border-radius: 1px; 
-        font-size: 0.55rem;
+        border-left: 3px solid #4caf50; 
+        padding: 6px; 
+        border-radius: 3px; 
+        font-size: 0.75rem;
     }
     .status-info { 
         background: #e3f2fd; 
-        border-left: 1px solid #2196f3; 
-        padding: 2px; 
-        border-radius: 1px; 
-        font-size: 0.55rem;
+        border-left: 3px solid #2196f3; 
+        padding: 6px; 
+        border-radius: 3px; 
+        font-size: 0.75rem;
     }
     .metric-card {
         background: white;
-        padding: 0.1rem;
-        border-radius: 2px;
-        box-shadow: 0 1px 1px rgba(0,0,0,0.1);
-        border-left: 1px solid #667eea;
+        padding: 0.3rem;
+        border-radius: 4px;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+        border-left: 2px solid #667eea;
     }
     /* Reducir espaciado general */
     .block-container {
-        padding-top: 0.1rem;
-        padding-bottom: 0.1rem;
+        padding-top: 0.5rem;
+        padding-bottom: 0.5rem;
     }
-    /* Métricas súper pequeñas */
+    /* Métricas más pequeñas */
     div[data-testid="metric-container"] {
         background-color: #f8f9fa;
-        border-radius: 2px;
-        padding: 0.1rem;
-        border-left: 1px solid #667eea;
+        border-radius: 4px;
+        padding: 0.25rem;
+        border-left: 2px solid #667eea;
+    }
+    div[data-testid="metric-container"] > div {
+        width: fit-content;
+        margin: auto;
     }
     div[data-testid="metric-container"] label {
-        font-size: 0.5rem !important;
+        font-size: 0.65rem !important;
         font-weight: 600;
     }
     div[data-testid="metric-container"] div[data-testid="metric-value"] {
-        font-size: 0.65rem !important;
+        font-size: 0.9rem !important;
         font-weight: bold;
     }
     /* Sidebar más compacto */
     .css-1d391kg {
-        padding-top: 0.1rem;
+        padding-top: 0.5rem;
     }
-    /* Títulos súper pequeños */
-    h1, h2, h3, h4, h5, h6 {
-        margin-bottom: 0.1rem !important;
-        margin-top: 0.1rem !important;
+    /* Títulos más pequeños */
+    h1, h2, h3 {
+        margin-bottom: 0.25rem !important;
+        margin-top: 0.25rem !important;
     }
     h1 {
-        font-size: 0.9rem !important;
+        font-size: 1.4rem !important;
     }
     h2 {
-        font-size: 0.7rem !important;
+        font-size: 1rem !important;
     }
     h3 {
-        font-size: 0.65rem !important;
-    }
-    h4 {
-        font-size: 0.6rem !important;
+        font-size: 0.9rem !important;
     }
     /* Reducir espaciado de elementos */
     .stSelectbox, .stSlider, .stCheckbox, .stTextInput, .stNumberInput {
-        margin-bottom: 0.1rem !important;
+        margin-bottom: 0.25rem !important;
     }
-    /* Texto general súper pequeño */
+    /* Texto general más pequeño */
     .stMarkdown p {
-        font-size: 0.6rem;
-        margin-bottom: 0.1rem;
+        font-size: 0.85rem;
     }
-    /* Botones súper pequeños */
+    /* Botones más pequeños */
     .stButton button {
-        font-size: 0.6rem !important;
-        padding: 0.1rem 0.2rem !important;
-        height: 1.5rem !important;
+        font-size: 0.8rem !important;
+        padding: 0.25rem 0.5rem !important;
     }
-    /* DataFrames súper compactos */
+    /* Dataframe más compacto */
     .stDataFrame {
-        font-size: 0.55rem;
-    }
-    /* Sidebar elementos súper pequeños */
-    .stSidebar .stSelectbox label, .stSidebar .stSlider label, .stSidebar .stCheckbox label {
-        font-size: 0.55rem !important;
-    }
-    /* Expanders súper compactos */
-    .streamlit-expanderHeader {
-        font-size: 0.6rem !important;
-    }
-    /* Caption súper pequeño */
-    .stCaption {
-        font-size: 0.5rem !important;
-    }
-    /* Input labels más pequeños */
-    label {
-        font-size: 0.55rem !important;
-    }
-    /* Plotly charts más pequeños */
-    .js-plotly-plot .plotly .modebar {
-        height: 20px !important;
-    }
-    /* Reducir altura de inputs */
-    .stSelectbox > div > div {
-        min-height: 1.5rem !important;
-    }
-    .stTextInput > div > div > input {
-        height: 1.5rem !important;
-        font-size: 0.6rem !important;
-    }
-    /* Slider más pequeño */
-    .stSlider > div > div > div {
-        height: 1rem !important;
-    }
-    /* Checkbox más pequeño */
-    .stCheckbox > label {
-        font-size: 0.55rem !important;
+        font-size: 0.75rem;
     }
 </style>
 """
