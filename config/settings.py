@@ -14,16 +14,15 @@ DETAIL_LIMIT = 50
 # CSS Styles
 MAIN_CSS = """
 <style>
-    /* ========== HEADER PRINCIPAL ========== */
+    /* ========== HEADER PRINCIPAL - VERSIÓN SIMPLE ========== */
     .main-header {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
+        color: #667eea;           /* Color sólido azul */
         font-size: 2rem;          /* Tamaño del título principal */
         font-weight: bold;
         text-align: center;
-        margin-bottom: 5px;    /* Espacio debajo del header */
-        margin-top: 5px;         /* Espacio arriba del header */
+        margin-bottom: 0.5rem;    /* Espacio debajo del header */
+        margin-top: 0rem;         /* Espacio arriba del header */
+        text-shadow: 1px 1px 2px rgba(0,0,0,0.1); /* Sombra sutil */
     }
     
     /* ========== CAJAS DE ESTADO ========== */
@@ -50,7 +49,7 @@ MAIN_CSS = """
     /* ========== CONFIGURACIÓN GENERAL DE LAYOUT ========== */
     /* Sidebar pegado arriba y compacto */
     .css-1d391kg {
-        padding-top: ;     /* Qué tan arriba está el sidebar (0 = pegado) */
+        padding-top: 0rem !important;     /* Qué tan arriba está el sidebar (0 = pegado) */
         margin-top: 0rem !important;
     }
     /* Contenido principal */
@@ -180,6 +179,28 @@ MAIN_CSS = """
     .stCaption {
         font-size: 0.8rem !important;     /* Tamaño texto explicativo pequeño */
     }
+    
+    /* ========== TU CÓDIGO PERSONALIZADO ========== */
+    /* Añade aquí tus modificaciones específicas */
+    .st-emotion-cache-16txtl3 {
+        padding: 1rem 1.5rem;              /* Tu modificación personalizada */
+    }
+    
+    /* Cambiar altura del elemento específico */
+    .st-emotion-cache-1r4qj8v {
+        height: 500px !important;          /* Cambia 500px por la altura que quieras */
+        /* O también puedes usar: */
+        /* min-height: 300px !important; */
+        /* max-height: 800px !important; */
+    }
+    
+    /* Si quieres que sea más genérico y funcione siempre, usa esto en su lugar: */
+    /*
+    [class*="st-emotion-cache"] {
+        padding: 1rem 1.5rem !important;   /* Aplica a todas las clases similares */
+    }
+    */
+    
 </style>
 """
 
@@ -201,4 +222,11 @@ AUTO_REFRESH_INTERVAL = 60
 EXTERNAL_APPS = {
     "tickets": "https://42activeusers-tickets.streamlit.app/",
     "stats": "https://42stats.streamlit.app/"
+}
+
+# Headers para las requests
+DEFAULT_HEADERS = {
+    'User-Agent': '42-Network-Evaluator/2.3',
+    'Accept': 'application/json',
+    'Content-Type': 'application/json'
 }
