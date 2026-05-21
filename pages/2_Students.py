@@ -57,25 +57,37 @@ def detect_grade(cu: dict) -> str:
 
 def fetch_students(campus_id, headers, max_pages):
     results = []
-    bar = st.progress(0, text="Cargando base de datos...")
+    bar = st.progress(0, text="Iniciando descarga de la base de datos...")
+    
+    # Contenedor de texto para los mensajes de lectura de página
+    status_msg = st.empty()
+    
     page = 1
     while page <= max_pages:
+        # Informar en tiempo real qué página se está leyendo
+        status_msg.markdown(f"📖 **Leyendo página {page}...** Solicitando próximos 100 registros a la API.")
+        
         url = f"https://api.intra.42.fr/v2/cursus/21/cursus_users?filter[campus_id]={campus_id}&page[size]=100&page[number]={page}&sort=-updated_at"
         resp = requests.get(url, headers=headers, timeout=20)
         
-        # ── CONTROL INTELIGENTE DE RATE LIMITS ──
+        # ── CONTROL DE RATE LIMITS ──
         if resp.status_code == 429:
             wait = int(resp.headers.get("Retry-After", 5))
-            st.toast(f"⏳ Rate limit alcanzado. Esperando {wait} segundos...", icon="⚠️")
+            status_msg.warning(f"⏳ **Rate limit alcanzado en página {page}.** El script se pausa por {wait} segundos...")
             time.sleep(wait)
-            continue # Reintenta la misma página tras esperar
+            continue # Reintenta exactamente la misma página
             
         if resp.status_code != 200: 
-            st.error(f"❌ Error de API ({resp.status_code}): {resp.text[:150]}")
+            st.error(f"❌ Error de API en página {page} ({resp.status_code}): {resp.text[:150]}")
             break
             
         data = resp.json()
-        if not data: break
+        if not data: 
+            status_msg.info(f"🏁 Fin de los datos detectado en la página {page} (Vacía).")
+            break
+
+        # Mensaje de éxito parcial para la página actual
+        status_msg.success(f"✅ ¡Página {page} recibida con éxito! Filtrando admins y procesando estudiantes...")
 
         for cu in data:
             user = cu.get("user", {})
@@ -98,13 +110,23 @@ def fetch_students(campus_id, headers, max_pages):
                 "Created_Raw": created_raw
             })
             
-        if len(data) < 100: break
+        # Actualizar barra visual de Streamlit (estimada sobre el max_pages)
+        bar.progress(min(page / max_pages, 1.0))
+        
+        if len(data) < 100: 
+            status_msg.info(f"🏁 Última página alcanzada ({page}). No hay más registros pendientes.")
+            break
+            
         page += 1
         
-        # Pequeña pausa de seguridad para no saturar el límite por segundo de la API de 42
+        # Pausa corta de cortesía para mitigar el límite por segundo
         time.sleep(0.5)
         
+    # Limpieza de los indicadores temporales al finalizar con éxito
+    time.sleep(1)
     bar.empty()
+    status_msg.empty()
+    
     return results
 
 # ── Sidebar Control ───────────────────────────────────────────────────────────
