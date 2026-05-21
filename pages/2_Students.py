@@ -70,14 +70,20 @@ def fetch_students(campus_id, headers, max_pages):
             user = cu.get("user", {})
             if not user: continue
             
-            # Extraer fechas nativas de la API para la reconstrucción
+            # Extraer el tipo de usuario (kind)
+            kind = user.get("kind", "")
+            
+            # ── FILTRO CRÍTICO: Omitir si es 'admin' o 'staff' ──
+            if kind != "student":
+                continue
+                
             bh_raw = cu.get("blackholed_at")
             created_raw = cu.get("created_at")
             
             results.append({
                 "Login": user.get("login", ""),
                 "Display Name": user.get("displayname", ""),
-                "Kind": user.get("kind", ""),
+                "Kind": kind,
                 "Current Grade": detect_grade(cu),
                 "Level": round(float(cu.get("level", 0)), 2),
                 "BH_Raw": bh_raw,
@@ -98,15 +104,17 @@ with st.sidebar:
 if load_btn:
     h = get_headers(force=True)
     if h:
-        with st.spinner("Conectando con la Intra de 42..."):
+        with st.spinner("Conectando con la Intra de 42 y filtrando Staff..."):
             rows = fetch_students(46, h, 100)
             if rows:
                 df = pd.DataFrame(rows)
-                # Parsear las fechas críticas a formato datetime de pandas
+                # Convertir fechas nativas para la lógica temporal
                 df["BH_Date"] = pd.to_datetime(df["BH_Raw"], errors='coerce').dt.date
                 df["Created_Date"] = pd.to_datetime(df["Created_Raw"], errors='coerce').dt.date
                 st.session_state["students_master_df"] = df
-                st.success(f"✅ {len(df)} registros procesados.")
+                st.success(f"✅ {len(df)} estudiantes reales procesados (Admins excluidos).")
+            else:
+                st.warning("⚠️ No se encontraron registros de estudiantes.")
 
 if "students_master_df" not in st.session_state:
     st.info("👆 Por favor, pulsa **Cargar alumnos** en el menú izquierdo para iniciar la aplicación.")
@@ -117,30 +125,26 @@ df_master = st.session_state["students_master_df"].copy()
 # ── PÁGINA 1: VISTA ACTUAL ────────────────────────────────────────────────────
 if page == "Directorio Actual":
     st.markdown('<div class="page-title">🎓 42 Students Directory (Hoy)</div>', unsafe_allow_html=True)
-    st.markdown('<div class="page-sub">Estado actual en tiempo real de los estudiantes cargados</div>', unsafe_allow_html=True)
+    st.markdown('<div class="page-sub">Estado actual en tiempo real de los estudiantes cargados (Excluidos cuentas Staff/Admin)</div>', unsafe_allow_html=True)
     
     st.dataframe(df_master[["Login", "Display Name", "Kind", "Current Grade", "Level"]], use_container_width=True, hide_index=True)
 
 # ── PÁGINA 2: HISTÓRICO RECONSTRUIDO 19.02 ────────────────────────────────────
 elif page == "Histórico 19.02.2025":
     st.markdown('<div class="page-title">📅 Reconstrucción Histórica: 19.02.2025</div>', unsafe_allow_html=True)
-    st.markdown('<div class="page-sub">Filtrado inteligente: Muestra quiénes tenían el Cursus activo estrictamente en esa fecha.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="page-sub">Filtrado inteligente: Muestra quiénes tenían el Cursus activo estrictamente en esa fecha (Solo Estudiantes).</div>', unsafe_allow_html=True)
     
-    # Definimos la fecha de corte exacta en el pasado
     fecha_corte = datetime(2025, 2, 19).date()
     
-    # APLICAMOS LA LÓGICA DE VIAJE EN EL TIEMPO:
-    # 1. Ya tenían que haber entrado al campus (Fecha de creación de Cursus anterior o igual al 19.02)
-    # 2. Su Black Hole tiene que ser en el futuro respecto al 19.02 (O no tener Black Hole registrado aún)
+    # Viaje en el tiempo sobre el dataframe ya limpio de admins
     df_historico = df_master[
         (df_master["Created_Date"] <= fecha_corte) & 
         ((df_master["BH_Date"].isna()) | (df_master["BH_Date"] > fecha_corte))
     ]
     
-    # Logins formateados para el archivo de texto
     logins_txt = "\n".join(df_historico["Login"].dropna().tolist())
     
-    # Interfaz de Descarga
+    # Interfaz de Descarga y Métricas
     c1, c2 = st.columns([1, 2])
     with c1:
         st.markdown('<div class="section-title">📥 DESCARGA DE USERMANES</div>', unsafe_allow_html=True)
@@ -155,15 +159,13 @@ elif page == "Histórico 19.02.2025":
     
     with c2:
         st.markdown('<div class="section-title">📊 ESTADÍSTICAS RECONSTRUIDAS</div>', unsafe_allow_html=True)
-        # Mostrar cuántos alumnos de los que estaban activos ese día se han terminado hundiendo hoy
         caidos_hoy = df_historico[df_historico["Current Grade"] == "Blackholed"]
-        st.write(f"• **Estudiantes totales en el Cursus ese día:** {len(df_historico)}")
+        st.write(f"• **Alumnos reales activos en el Cursus ese día:** {len(df_historico)}")
         st.write(f"• **De esos alumnos, ¿cuántos han caído en el Black Hole a día de hoy?:** {len(caidos_hoy)}")
 
     st.markdown("---")
     st.markdown('<div class="section-title">📋 LISTA COMPLETA DE LA COHORTE EN ESA FECHA</div>', unsafe_allow_html=True)
     
-    # Mostramos los datos simulados de cómo se veía la cohorte en esa fecha
     st.dataframe(
         df_historico[["Login", "Display Name", "Kind", "Level", "Current Grade"]].rename(
             columns={"Current Grade": "Estado Actual (Hoy)"}
