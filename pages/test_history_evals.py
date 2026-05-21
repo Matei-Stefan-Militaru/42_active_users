@@ -168,8 +168,8 @@ if load_btn and login:
         df["created_at_dt"] = pd.to_datetime(df[date_col], utc=True, errors="coerce").dt.tz_localize(None)
         df = df.sort_values("created_at_dt", ascending=False).reset_index(drop=True)
 
-        # FIX: compute delta safely, fill NaN for the oldest record
-        df["delta"] = (df["sum"] - df["sum"].shift(-1)).fillna(df["sum"])
+        # FIX: compute delta from sum diff (API "point" field is often 0)
+        df["delta"] = (df["sum"] - df["sum"].shift(-1)).fillna(df["sum"].iloc[-1])
 
         st.session_state["hist_df"]       = df
         st.session_state["hist_login"]    = login
@@ -258,7 +258,8 @@ display_df["created_at_dt"] = display_df["created_at_dt"].dt.strftime("%Y-%m-%d 
 
 # Cards para los primeros 50
 for _, row in df.head(50).iterrows():
-    point  = row.get("point", 0) or 0
+    # FIX: use computed delta, not the API "point" field (often 0)
+    point  = int(row.get("delta", 0) or 0)
     reason = row.get("reason", "—") or "—"
     total  = row.get("sum", "")
     date_s = row["created_at_dt"].strftime("%Y-%m-%d %H:%M") if pd.notna(row["created_at_dt"]) else "—"
