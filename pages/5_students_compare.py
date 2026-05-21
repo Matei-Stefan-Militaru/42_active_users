@@ -76,22 +76,21 @@ if not headers:
     st.error("❌ No se pudo autenticar. Revisa los secrets.")
     st.stop()
 
-# ── Require students_df_filtered from directory page ─────────────────────────
-if (
-    "students_df_filtered" not in st.session_state
-    or st.session_state["students_df_filtered"].empty
-):
-    st.warning("⚠️ Ve primero a **Students Directory**, aplica los filtros que quieras y pulsa **Cargar estudiantes**.")
+# ── Require students_df (completo, con Blackholed) ───────────────────────────
+# Usamos students_df en lugar de students_df_filtered para incluir a los
+# Blackholed que en fechas pasadas aún eran activos
+if "students_df" not in st.session_state or st.session_state["students_df"].empty:
+    st.warning("⚠️ Ve primero a **Students Directory** y pulsa **Cargar estudiantes**.")
     st.stop()
 
-src_df = st.session_state["students_df_filtered"].copy()
+src_df = st.session_state["students_df"].copy()
 src_df = src_df[src_df["Kind"] == "student"].reset_index(drop=True)
 
 if src_df.empty:
-    st.warning("⚠️ No hay students (kind=student) en los datos cargados. Revisa los filtros en Students Directory.")
+    st.warning("⚠️ No hay students (kind=student) en los datos cargados.")
     st.stop()
 
-st.info(f"✅ {len(src_df)} students cargados desde Students Directory")
+st.info(f"✅ {len(src_df)} students cargados (todos los grades, incluidos Blackholed)")
 
 # ── Fixed dates ───────────────────────────────────────────────────────────────
 DATE_1 = date(2026, 2, 19)
@@ -160,17 +159,47 @@ def fetch_full_history(user_id, headers):
 
 # ── Puntos en una fecha dada a partir del historial ya descargado ─────────────
 def pts_on_date(hist_df, target_date):
-    """Dado el historial completo, devuelve el saldo en target_date (fin del día)."""
+    """
+    Dado el historial completo (ordenado desc), devuelve el saldo en target_date.
+
+    Casos:
+    1. Hay registros anteriores o iguales a target_date → coger el más reciente (iloc[0])
+    2. No hay registros anteriores (todos son posteriores) → el usuario existía pero
+       no había tenido movimientos aún. El saldo en esa fecha era:
+         total_del_evento_mas_antiguo - sum_del_evento_mas_antiguo
+       (es decir, el saldo justo ANTES del primer movimiento registrado).
+       Si ese valor es 0 o negativo y no tiene sentido, devolvemos 0.
+    """
     end_of_day = datetime(target_date.year, target_date.month, target_date.day, 23, 59, 59)
-    filtered = hist_df[hist_df["created_at_dt"] <= end_of_day]
-    if filtered.empty:
+
+    before = hist_df[hist_df["created_at_dt"] <= end_of_day]
+
+    if not before.empty:
+        # Caso 1: hay historial hasta esa fecha, coger el más reciente
+        row = before.iloc[0]
+        total = row.get("total")
+        return int(total) if total is not None and pd.notna(total) else None
+
+    # Caso 2: todos los registros son posteriores a target_date
+    # → inferir saldo pre-primer-movimiento
+    # hist_df está ordenado desc, el más antiguo es el último
+    oldest = hist_df.iloc[-1]
+    total_oldest = oldest.get("total")
+    sum_oldest   = oldest.get("sum", 0)
+
+    if total_oldest is None or pd.isna(total_oldest):
         return None
-    row = filtered.iloc[0]  # el más reciente antes del fin del día
-    total = row.get("total")
-    return int(total) if total is not None and pd.notna(total) else None
+
+    pre_balance = int(total_oldest) - int(sum_oldest or 0)
+    # Si el saldo inferido es negativo no tiene sentido → devolver 0
+    return max(pre_balance, 0)
 
 # ── Calculate ─────────────────────────────────────────────────────────────────
 if calc_btn:
+    # Limpiar resultados anteriores para forzar recálculo limpio
+    for _k in ["cep_df", "cep_date_base"]:
+        st.session_state.pop(_k, None)
+
     bar    = st.progress(0, text="Procesando usuarios…")
     status = st.empty()
     total  = len(src_df)
@@ -226,12 +255,21 @@ df        = st.session_state["cep_df"].copy()
 date_base = st.session_state["cep_date_base"]
 
 # ── Render summary ─────────────────────────────────────────────────────────────
+# Umbral para detectar outliers de corrección errónea (ej: -1000 pts)
+OUTLIER_THRESHOLD = -100
+
 def render_summary(df, col_pts, title):
     sub = df.dropna(subset=[col_pts]).copy()
     sub[col_pts] = sub[col_pts].astype(int)
+    # Excluir outliers: valores por debajo del umbral son errores de administración
+    outliers = sub[sub[col_pts] < OUTLIER_THRESHOLD]
+    sub = sub[sub[col_pts] >= OUTLIER_THRESHOLD]
     if sub.empty:
         st.warning(f"Sin datos para {title}")
         return
+    if not outliers.empty:
+        logins = ", ".join(outliers["Login"].tolist())
+        st.caption(f"⚠️ {len(outliers)} usuario(s) excluido(s) por valor anómalo (<{OUTLIER_THRESHOLD} pts): {logins}")
 
     total = int(sub[col_pts].sum())
     avg   = sub[col_pts].mean()
@@ -296,6 +334,7 @@ st.markdown('<div class="section-title">📈 VARIACIÓN (vs HOY)</div>', unsafe_
 
 def variation_stats(df, col, label):
     sub = df.dropna(subset=[col]).copy()
+    sub = sub[sub[col] >= OUTLIER_THRESHOLD]  # excluir outliers
     if sub.empty:
         return None
     diff  = int(df["Eval Points"].sum()) - int(sub[col].sum())
@@ -325,6 +364,7 @@ st.markdown("---")
 st.markdown(f'<div class="section-title">🏆 TOP MOVERS — HOY vs {date_base.strftime("%d/%m/%Y")}</div>', unsafe_allow_html=True)
 
 df_both = df.dropna(subset=["pts_base"]).copy()
+df_both = df_both[df_both["pts_base"] >= OUTLIER_THRESHOLD]  # excluir outliers
 df_both["variacion"] = df_both["Eval Points"] - df_both["pts_base"].astype(int)
 
 col_a, col_b = st.columns(2)
