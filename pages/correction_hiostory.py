@@ -1,8 +1,3 @@
-Aquí tienes el código completo para tu archivo de Streamlit (por ejemplo, puedes llamarlo `pag_generador_fechas.py`).
-
-He unificado la estructura que venías usando con toda la lógica de autenticación, el control de flujo, el **parche de seguridad por si falla la API** (calculando el último saldo conocido para que no rompa la consistencia numérica) y la reconstrucción matemática inversa si consultas una fecha pasada.
-
-```python
 import streamlit as st
 import requests
 import pandas as pd
@@ -258,5 +253,3 @@ else:
             mime="text/csv",
             use_container_width=True
         )
-
-```
