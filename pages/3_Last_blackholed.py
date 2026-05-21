@@ -148,7 +148,7 @@ def fetch_blackholed(campus_id, headers, max_pages, debug):
                 continue
 
             user = cu.get("user", {})
-            if not user:
+            if user.get("active?", True):  # si sigue activo → ignorar
                 continue
 
             days_ago = (now_utc - bh_dt).days
