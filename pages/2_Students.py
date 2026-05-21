@@ -62,7 +62,18 @@ def fetch_students(campus_id, headers, max_pages):
     while page <= max_pages:
         url = f"https://api.intra.42.fr/v2/cursus/21/cursus_users?filter[campus_id]={campus_id}&page[size]=100&page[number]={page}&sort=-updated_at"
         resp = requests.get(url, headers=headers, timeout=20)
-        if resp.status_code != 200: break
+        
+        # ── CONTROL INTELIGENTE DE RATE LIMITS ──
+        if resp.status_code == 429:
+            wait = int(resp.headers.get("Retry-After", 5))
+            st.toast(f"⏳ Rate limit alcanzado. Esperando {wait} segundos...", icon="⚠️")
+            time.sleep(wait)
+            continue # Reintenta la misma página tras esperar
+            
+        if resp.status_code != 200: 
+            st.error(f"❌ Error de API ({resp.status_code}): {resp.text[:150]}")
+            break
+            
         data = resp.json()
         if not data: break
 
@@ -70,10 +81,7 @@ def fetch_students(campus_id, headers, max_pages):
             user = cu.get("user", {})
             if not user: continue
             
-            # Extraer el tipo de usuario (kind)
             kind = user.get("kind", "")
-            
-            # ── FILTRO CRÍTICO: Omitir si es 'admin' o 'staff' ──
             if kind != "student":
                 continue
                 
@@ -89,8 +97,13 @@ def fetch_students(campus_id, headers, max_pages):
                 "BH_Raw": bh_raw,
                 "Created_Raw": created_raw
             })
+            
         if len(data) < 100: break
         page += 1
+        
+        # Pequeña pausa de seguridad para no saturar el límite por segundo de la API de 42
+        time.sleep(0.5)
+        
     bar.empty()
     return results
 
