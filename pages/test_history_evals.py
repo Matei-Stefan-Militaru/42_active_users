@@ -182,6 +182,7 @@ if load_btn and login:
         date_col = "created_at" if "created_at" in df.columns else "updated_at"
         df["created_at_dt"] = pd.to_datetime(df[date_col], utc=True, errors="coerce").dt.tz_localize(None)
         df = df.sort_values("created_at_dt", ascending=False).reset_index(drop=True)
+        df["delta"] = df["sum"] - df["sum"].shift(-1)
 
         st.session_state["hist_df"]       = df
         st.session_state["hist_login"]    = login
@@ -216,18 +217,15 @@ def get_pts_on(df, target_date):
     end_of_day = datetime(target_date.year, target_date.month, target_date.day, 23, 59, 59)
     filtered = df[df["created_at_dt"] <= end_of_day]
     if filtered.empty:
-        return "Sin datos"
+        return "Sin datos antes de esa fecha"
+    # El primer registro (ordenado desc) es el más reciente antes de ese día
     row = filtered.iloc[0]
-    # La API devuelve 'sum' como el total acumulado después de cada evento
-    if "sum" in df.columns and pd.notna(row.get("sum")):
+    if "sum" in .columns and pd.notna(row.get("sum")):
         return int(row["sum"])
-    # Fallback: sumar todos los 'reason' points hasta esa fecha
-    if "point" in df.columns:
-        return int(df[df["created_at_dt"] <= end_of_day]["point"].sum())
     return "N/A"
 
-pts_d1 = get_pts_on(df, d1)
-pts_d2 = get_pts_on(df, d2)
+pts_d1 = get_pts_on(, d1)
+pts_d2 = get_pts_on(, d2)
 
 # ── Header usuario ────────────────────────────────────────────────────────────
 st.markdown(f"### 👤 {disp_name} &nbsp;<small style='color:var(--muted);font-size:0.9rem'>({hist_login})</small>", unsafe_allow_html=True)
