@@ -32,7 +32,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown('<div class="page-title">🏫 Campus Eval Points</div>', unsafe_allow_html=True)
-st.markdown('<div class="page-sub">Comparativa de correction points — solo students</div>', unsafe_allow_html=True)
+st.markdown('<div class="page-sub">Comparativa de correction points en 4 fechas — solo students</div>', unsafe_allow_html=True)
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
 def get_token():
@@ -77,7 +77,6 @@ if not headers:
     st.stop()
 
 # ── Require students_df_filtered from directory page ─────────────────────────
-# FIX: comprobar students_df_filtered directamente (no students_df)
 if (
     "students_df_filtered" not in st.session_state
     or st.session_state["students_df_filtered"].empty
@@ -101,17 +100,29 @@ with st.sidebar:
     campus_name = st.session_state.get("selected_campus", "Barcelona")
     st.info(f"📍 **{campus_name}** · {len(src_df)} students")
 
-    date_base = st.date_input("Fecha base (pasado)", value=date(2026, 5, 13))
-    debug     = st.checkbox("🐛 Debug", value=False)
+    st.markdown("**Fechas fijas**")
+    st.caption("19/02/2026 · 24/02/2026 (siempre incluidas)")
+
+    st.markdown("**Fecha adicional configurable**")
+    date_base = st.date_input("Fecha base", value=date(2026, 5, 13))
+
+    debug    = st.checkbox("🐛 Debug", value=False)
 
     st.markdown("---")
     st.markdown(f"""
-    **Fecha base:** {date_base.strftime('%d/%m/%Y')}  
-    **Fecha actual:** puntos en API (ahora)  
-    Llamará a la API de historial de los **{len(src_df)} students**.  
+    Se consultará el historial de **{len(src_df)} students** para:
+    - 19/02/2026
+    - 24/02/2026
+    - {date_base.strftime('%d/%m/%Y')}
+    - Hoy (puntos actuales de la API)
+
     ⏱️ Puede tardar varios minutos.
     """)
     calc_btn = st.button("🚀 Calcular comparativa", type="primary", use_container_width=True)
+
+# ── Fixed dates ───────────────────────────────────────────────────────────────
+DATE_1 = date(2026, 2, 19)
+DATE_2 = date(2026, 2, 24)
 
 # ── Helper: puntos en fecha ───────────────────────────────────────────────────
 def get_pts_on_date(user_id, target_date, headers):
@@ -150,13 +161,19 @@ def get_pts_on_date(user_id, target_date, headers):
         page += 1
     return None
 
-# ── Render summary (same style as students directory) ─────────────────────────
-def render_summary(df, title):
-    total = int(df["Eval Points"].sum())
-    avg   = df["Eval Points"].mean()
-    mx    = int(df["Eval Points"].max())
-    mn    = int(df["Eval Points"].min())
-    top   = df.loc[df["Eval Points"].idxmax(), "Login"]
+# ── Render summary ─────────────────────────────────────────────────────────────
+def render_summary(df, col_pts, title):
+    sub = df.dropna(subset=[col_pts]).copy()
+    sub[col_pts] = sub[col_pts].astype(int)
+    if sub.empty:
+        st.warning(f"Sin datos para {title}")
+        return
+
+    total = int(sub[col_pts].sum())
+    avg   = sub[col_pts].mean()
+    mx    = int(sub[col_pts].max())
+    mn    = int(sub[col_pts].min())
+    top   = sub.loc[sub[col_pts].idxmax(), "Login"]
 
     st.markdown(f'<div class="section-title">💰 {title}</div>', unsafe_allow_html=True)
     st.markdown(f"""
@@ -182,7 +199,7 @@ def render_summary(df, title):
 
     st.markdown("<br><b style='color:#e2e8f0;font-family:JetBrains Mono,monospace;font-size:0.8rem'>POR GRADE</b>", unsafe_allow_html=True)
     for _, row in (
-        df.groupby("Grade")["Eval Points"]
+        sub.groupby("Grade")[col_pts]
         .agg(["sum", "mean", "count"])
         .reset_index()
         .sort_values("sum", ascending=False)
@@ -201,29 +218,36 @@ if calc_btn:
     bar    = st.progress(0, text="Procesando usuarios…")
     status = st.empty()
     total  = len(src_df)
+
+    pts_d1   = {}
+    pts_d2   = {}
     pts_base = {}
 
     for i, row in src_df.iterrows():
-        login   = row["Login"]
+        login = row["Login"]
         status.text(f"⏳ {i+1}/{total} — {login}")
         bar.progress((i + 1) / total)
 
         # Get user_id
         resp = api_get(f"https://api.intra.42.fr/v2/users/{login}", headers)
         if resp.status_code != 200:
-            pts_base[login] = None
+            pts_d1[login] = pts_d2[login] = pts_base[login] = None
             continue
         user_id = resp.json().get("id")
         if not user_id:
-            pts_base[login] = None
+            pts_d1[login] = pts_d2[login] = pts_base[login] = None
             continue
 
+        pts_d1[login]   = get_pts_on_date(user_id, DATE_1,    headers)
+        pts_d2[login]   = get_pts_on_date(user_id, DATE_2,    headers)
         pts_base[login] = get_pts_on_date(user_id, date_base, headers)
 
     bar.empty()
     status.empty()
 
-    src_df["pts_base"] = src_df["Login"].map(pts_base)
+    src_df["pts_19_02"] = src_df["Login"].map(pts_d1)
+    src_df["pts_24_02"] = src_df["Login"].map(pts_d2)
+    src_df["pts_base"]  = src_df["Login"].map(pts_base)
 
     st.session_state["cep_df"]        = src_df
     st.session_state["cep_date_base"] = date_base
@@ -237,54 +261,56 @@ if "cep_df" not in st.session_state:
 df        = st.session_state["cep_df"].copy()
 date_base = st.session_state["cep_date_base"]
 
-# ── HOY — puntos actuales (ya en src_df como "Eval Points") ──────────────────
+# ── Summaries — 4 columnas ────────────────────────────────────────────────────
 st.markdown("---")
-col1, col2 = st.columns(2)
+c1, c2, c3, c4 = st.columns(4)
 
-with col1:
-    render_summary(df, "HOY — EVALUATION POINTS")
+with c1:
+    render_summary(df, "pts_19_02", "19/02/2026")
+with c2:
+    render_summary(df, "pts_24_02", "24/02/2026")
+with c3:
+    render_summary(df, "pts_base",  date_base.strftime("%d/%m/%Y"))
+with c4:
+    render_summary(df, "Eval Points", "HOY")
 
-# ── FECHA BASE — construir df equivalente con pts_base ───────────────────────
-df_base = df.dropna(subset=["pts_base"]).copy()
-df_base["Eval Points"] = df_base["pts_base"].astype(int)
-no_data = len(df) - len(df_base)
-
-with col2:
-    if df_base.empty:
-        st.warning("Sin datos históricos para esa fecha.")
-    else:
-        render_summary(df_base, f"{date_base.strftime('%d/%m/%Y')} — EVALUATION POINTS")
-        if no_data > 0:
-            st.caption(f"ℹ️ {no_data} usuarios sin historial en esa fecha (no incluidos en la columna base)")
-
-# ── Variación ─────────────────────────────────────────────────────────────────
+# ── Variación global ──────────────────────────────────────────────────────────
 st.markdown("---")
-st.markdown('<div class="section-title">📈 VARIACIÓN</div>', unsafe_allow_html=True)
+st.markdown('<div class="section-title">📈 VARIACIÓN (vs HOY)</div>', unsafe_allow_html=True)
+
+def variation_stats(df, col, label):
+    sub = df.dropna(subset=[col]).copy()
+    if sub.empty:
+        return None
+    diff  = int(df["Eval Points"].sum()) - int(sub[col].sum())
+    sign  = "+" if diff >= 0 else ""
+    color = "#00ff88" if diff >= 0 else "#ff4444"
+    return (f"{sign}{diff:,}", label, color)
+
+stats = [
+    variation_stats(df, "pts_19_02", "vs 19/02"),
+    variation_stats(df, "pts_24_02", "vs 24/02"),
+    variation_stats(df, "pts_base",  f"vs {date_base.strftime('%d/%m/%Y')}"),
+    (f"{int(df['Eval Points'].sum()):,}", "TOTAL HOY", "var(--accent)"),
+]
+
+var_cols = st.columns(4)
+for col, s in zip(var_cols, stats):
+    if s:
+        val, lbl, clr = s
+        col.markdown(
+            f'<div class="stat-card"><div class="stat-val" style="color:{clr}">{val}</div>'
+            f'<div class="stat-lbl">{lbl}</div></div>',
+            unsafe_allow_html=True
+        )
+
+# ── Top movers (vs fecha base configurable) ───────────────────────────────────
+st.markdown("---")
+st.markdown(f'<div class="section-title">🏆 TOP MOVERS — HOY vs {date_base.strftime("%d/%m/%Y")}</div>', unsafe_allow_html=True)
 
 df_both = df.dropna(subset=["pts_base"]).copy()
 df_both["variacion"] = df_both["Eval Points"] - df_both["pts_base"].astype(int)
 
-total_now  = int(df["Eval Points"].sum())
-total_base = int(df_both["pts_base"].sum())
-diff       = total_now - total_base
-sign       = "+" if diff >= 0 else ""
-color      = "#00ff88" if diff >= 0 else "#ff4444"
-
-c1, c2, c3, c4 = st.columns(4)
-for col, (val, lbl, clr) in zip([c1, c2, c3, c4], [
-    (f"{total_base:,}", f"TOTAL {date_base.strftime('%d/%m/%Y')}", "var(--accent)"),
-    (f"{total_now:,}",  "TOTAL HOY",                               "var(--accent)"),
-    (f"{sign}{diff:,}", "VARIACIÓN",                               color),
-    (len(df_both),      "USUARIOS CON DATOS",                      "var(--muted)"),
-]):
-    col.markdown(
-        f'<div class="stat-card"><div class="stat-val" style="color:{clr}">{val}</div>'
-        f'<div class="stat-lbl">{lbl}</div></div>',
-        unsafe_allow_html=True
-    )
-
-# Top movers
-st.markdown("<br>", unsafe_allow_html=True)
 col_a, col_b = st.columns(2)
 
 with col_a:
@@ -315,12 +341,30 @@ with col_b:
             unsafe_allow_html=True
         )
 
+# ── Tabla completa ────────────────────────────────────────────────────────────
+st.markdown("---")
+st.markdown('<div class="section-title">📋 TABLA COMPLETA</div>', unsafe_allow_html=True)
+
+base_col_label = date_base.strftime("%d/%m/%Y")
+table = df[["Login", "Grade", "pts_19_02", "pts_24_02", "pts_base", "Eval Points"]].copy()
+table.columns = ["Login", "Grade", "19/02", "24/02", base_col_label, "Hoy"]
+
+table[f"Δ vs {date_base.strftime('%d/%m')}"] = (
+    table["Hoy"] - table[base_col_label]
+).where(table[base_col_label].notna())
+
+st.dataframe(
+    table,
+    use_container_width=True,
+    hide_index=True,
+    height=500,
+    column_config={
+        "Login": st.column_config.TextColumn("Login", width="small"),
+        "Grade": st.column_config.TextColumn("Grade", width="small"),
+    }
+)
+
 # ── Export ────────────────────────────────────────────────────────────────────
 st.markdown("---")
-export = df_both[["Login", "Grade", "Eval Points", "pts_base", "variacion"]].rename(columns={
-    "Eval Points": "Pts hoy",
-    "pts_base":    f"Pts {date_base.strftime('%d/%m/%Y')}",
-    "variacion":   "Variación",
-})
-csv = export.to_csv(index=False).encode("utf-8")
+csv = table.to_csv(index=False).encode("utf-8")
 st.download_button("⬇️ Exportar CSV", csv, "campus_eval_points.csv", "text/csv")
