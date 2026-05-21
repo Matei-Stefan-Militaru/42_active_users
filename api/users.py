@@ -174,54 +174,73 @@ def get_users_by_activity(campus_id, headers, days_back, max_users, status_text,
     return users[:max_users]
 
 def get_users_by_locations(campus_id, headers, status_text, debug_mode=False):
-    """Obtener usuarios actualmente en el campus usando el campo location"""
+    """Obtener usuarios actualmente en el campus usando el endpoint de locations"""
     users = []
     
     try:
         status_text.text("🔍 Buscando usuarios actualmente en el campus...")
         
-        # Obtener usuarios del campus (método directo)
-        campus_users_url = f"{API_BASE_URL}/v2/campus/{campus_id}/users?page[size]={DEFAULT_PAGE_SIZE}"
+        # ✅ Endpoint correcto: locations activas del campus
+        page = 1
+        all_location_logins = {}
         
-        response = requests.get(campus_users_url, headers=headers, timeout=20)
-        
-        if response.status_code == 200:
-            campus_users = response.json()
-            if campus_users:
-                status_text.text(f"✅ Encontrados {len(campus_users)} usuarios del campus")
-                
-                # Filtrar usuarios que tienen location (están físicamente en el campus)
-                active_users = []
-                for user in campus_users:
-                    user_location = user.get('location')
-                    if user_location and user_location != "unavailable" and user_location.strip():
-                        # El usuario está en una ubicación física
-                        user['location_active'] = True
-                        user['last_location'] = user.get('updated_at')  # Usar updated_at como referencia
-                        active_users.append(user)
-                        
-                        if debug_mode:
-                            st.write(f"👤 Usuario activo: {user.get('login', 'N/A')} en {user_location}")
-                
-                users = active_users
-                
-                if debug_mode:
-                    st.success(f"✅ Encontrados {len(users)} usuarios activamente en campus de {len(campus_users)} totales")
-                    if users:
-                        locations = [u.get('location', 'N/A') for u in users]
-                        unique_locations = list(set(locations))
-                        st.write(f"📍 Ubicaciones activas: {', '.join(unique_locations[:10])}")  # Mostrar max 10
-            else:
-                if debug_mode:
-                    st.info("📭 No se encontraron usuarios en este campus")
-        else:
+        while True:
+            url = f"{API_BASE_URL}/v2/campus/{campus_id}/locations?filter[active]=true&page[size]=100&page[number]={page}"
+            
             if debug_mode:
-                st.warning(f"⚠️ Error obteniendo usuarios del campus: {response.status_code}")
-                st.write(f"URL: {campus_users_url}")
-                
+                st.write(f"🔍 Locations URL: {url}")
+            
+            response = requests.get(url, headers=headers, timeout=20)
+            
+            if response.status_code != 200:
+                if debug_mode:
+                    st.warning(f"⚠️ Error locations: {response.status_code}")
+                break
+            
+            data = response.json()
+            if not data:
+                break
+            
+            for loc in data:
+                user = loc.get("user", {})
+                if user and user.get("login"):
+                    login = user["login"]
+                    all_location_logins[login] = {
+                        "location": loc.get("host", "N/A"),
+                        "begin_at": loc.get("begin_at"),
+                        "location_active": True,
+                        "last_location": loc.get("begin_at"),
+                    }
+            
+            if debug_mode:
+                st.info(f"📍 Página {page}: {len(data)} locations activas")
+            
+            if len(data) < 100:
+                break
+            page += 1
+        
+        if debug_mode:
+            st.success(f"✅ Total usuarios con location activa: {len(all_location_logins)}")
+        
+        # Ahora obtener los datos completos de cada usuario
+        for login, loc_data in all_location_logins.items():
+            try:
+                url = f"{API_BASE_URL}/v2/users/{login}"
+                resp = requests.get(url, headers=headers, timeout=10)
+                if resp.status_code == 200:
+                    user_data = resp.json()
+                    user_data["location"] = loc_data["location"]
+                    user_data["location_active"] = True
+                    user_data["last_location"] = loc_data["last_location"]
+                    users.append(user_data)
+            except Exception as e:
+                if debug_mode:
+                    st.error(f"❌ Error obteniendo usuario {login}: {e}")
+                continue
+        
     except Exception as e:
         if debug_mode:
-            st.error(f"❌ Error obteniendo usuarios del campus: {str(e)}")
+            st.error(f"❌ Error general: {str(e)}")
     
     return users
 
