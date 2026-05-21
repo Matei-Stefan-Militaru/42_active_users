@@ -30,6 +30,7 @@ st.markdown("""
 .hist-date   { font-size:0.7rem; color:var(--muted); margin-top:2px; }
 .hist-pts-pos { font-size:1.1rem; font-weight:700; color:var(--green); }
 .hist-pts-neg { font-size:1.1rem; font-weight:700; color:#ff4444; }
+.hist-pts-zero { font-size:1.1rem; font-weight:700; color:var(--muted); }
 .hist-total   { font-size:0.75rem; color:var(--muted); text-align:right; margin-top:2px; }
 </style>
 """, unsafe_allow_html=True)
@@ -168,8 +169,9 @@ if load_btn and login:
         df["created_at_dt"] = pd.to_datetime(df[date_col], utc=True, errors="coerce").dt.tz_localize(None)
         df = df.sort_values("created_at_dt", ascending=False).reset_index(drop=True)
 
-        # FIX: compute delta from sum diff (API "point" field is often 0)
-        df["delta"] = (df["sum"] - df["sum"].shift(-1)).fillna(df["sum"].iloc[-1])
+        # API fields:
+        #   "sum"   → delta of this event (points gained/lost)
+        #   "total" → running balance after this event
 
         st.session_state["hist_df"]       = df
         st.session_state["hist_login"]    = login
@@ -200,15 +202,15 @@ d2          = st.session_state["hist_date2"]
 hist_login  = st.session_state["hist_login"]
 
 # ── Calcular puntos en cada fecha ─────────────────────────────────────────────
-# FIX: was referencing bare `.columns` and missing `df` argument in calls
+# "total" = saldo acumulado después del evento → usamos eso
 def get_pts_on(df, target_date):
     end_of_day = datetime(target_date.year, target_date.month, target_date.day, 23, 59, 59)
     filtered = df[df["created_at_dt"] <= end_of_day]
     if filtered.empty:
         return "Sin datos antes de esa fecha"
-    row = filtered.iloc[0]
-    if "sum" in filtered.columns and pd.notna(row.get("sum")):
-        return int(row["sum"])
+    row = filtered.iloc[0]  # más reciente antes del fin del día
+    if "total" in filtered.columns and pd.notna(row.get("total")):
+        return int(row["total"])
     return "N/A"
 
 pts_d1 = get_pts_on(df, d1)
@@ -222,10 +224,10 @@ c1, c2, c3, c4 = st.columns(4)
 for col, (val, lbl) in zip(
     [c1, c2, c3, c4],
     [
-        (cur_pts,         "PUNTOS ACTUALES"),
-        (pts_d1,          f"PUNTOS {d1.strftime('%d/%m/%Y')}"),
-        (pts_d2,          f"PUNTOS {d2.strftime('%d/%m/%Y')}"),
-        (len(df),         "TOTAL EVENTOS"),
+        (cur_pts,  "PUNTOS ACTUALES"),
+        (pts_d1,   f"PUNTOS {d1.strftime('%d/%m/%Y')}"),
+        (pts_d2,   f"PUNTOS {d2.strftime('%d/%m/%Y')}"),
+        (len(df),  "TOTAL EVENTOS"),
     ]
 ):
     col.markdown(
@@ -251,22 +253,31 @@ st.markdown("---")
 # ── Historial completo ────────────────────────────────────────────────────────
 st.markdown("### 📋 Historial de eventos")
 
-# Mostrar columnas relevantes
-show_cols = [c for c in ["created_at_dt", "reason", "point", "sum", "updated_at"] if c in df.columns]
+# Columnas relevantes para export
+show_cols = [c for c in ["created_at_dt", "reason", "sum", "total", "updated_at"] if c in df.columns]
 display_df = df[show_cols].copy()
 display_df["created_at_dt"] = display_df["created_at_dt"].dt.strftime("%Y-%m-%d %H:%M")
 
 # Cards para los primeros 50
 for _, row in df.head(50).iterrows():
-    # FIX: use computed delta, not the API "point" field (often 0)
-    point  = int(row.get("delta", 0) or 0)
+    # "sum" = delta del evento (puede ser negativo, positivo o 0)
+    delta  = int(row.get("sum", 0) or 0)
+    # "total" = saldo acumulado después del evento
+    total  = row.get("total", None)
     reason = row.get("reason", "—") or "—"
-    total  = row.get("sum", "")
     date_s = row["created_at_dt"].strftime("%Y-%m-%d %H:%M") if pd.notna(row["created_at_dt"]) else "—"
 
-    pts_class = "hist-pts-pos" if point >= 0 else "hist-pts-neg"
-    sign      = "+" if point > 0 else ""
-    total_str = f"Total: {int(total)}" if total != "" and pd.notna(total) else ""
+    if delta > 0:
+        pts_class = "hist-pts-pos"
+        sign      = "+"
+    elif delta < 0:
+        pts_class = "hist-pts-neg"
+        sign      = ""
+    else:
+        pts_class = "hist-pts-zero"
+        sign      = ""
+
+    total_str = f"Saldo: {int(total)}" if total is not None and pd.notna(total) else ""
 
     st.markdown(f"""
     <div class="hist-card">
@@ -275,7 +286,7 @@ for _, row in df.head(50).iterrows():
             <div class="hist-date">{date_s}</div>
         </div>
         <div style="text-align:right">
-            <div class="{pts_class}">{sign}{int(point)} pts</div>
+            <div class="{pts_class}">{sign}{delta} pts</div>
             <div class="hist-total">{total_str}</div>
         </div>
     </div>
