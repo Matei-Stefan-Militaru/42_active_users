@@ -136,7 +136,8 @@ def fetch_students(campus_id, headers, max_pages, debug):
                 continue
 
             grade = detect_grade(cu)
-
+            if debug:
+                st.write(f"{user.get('login')} | kind: {user.get('kind')} | grade: {grade} | bh: {cu.get('blackholed_at')}")
             # Cadet: descartar solo si el blackhole ya ocurrió (fecha pasada)
             if grade == "Cadet" and cu.get("blackholed_at"):
                 try:
