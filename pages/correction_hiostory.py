@@ -66,7 +66,7 @@ if not headers:
     st.error("❌ No se pudo autenticar. Revisa los secrets.")
     st.stop()
 
-# ── Métodos de Historial ──────────────────────────────────────────────────────
+# ── Métodos de Inferencia de Puntos Históricos ────────────────────────────────
 def fetch_full_history(user_id, headers):
     """Descarga todo el historial de puntos de un alumno."""
     all_records = []
@@ -101,7 +101,7 @@ def fetch_full_history(user_id, headers):
     return df.sort_values("created_at_dt", ascending=False).reset_index(drop=True)
 
 def pts_on_date(df, target_date):
-    """Calcula matemáticamente el saldo en el día objetivo (EOD)."""
+    """Calcula el saldo exacto al final del día buscado (EOD)."""
     end_of_day = datetime(target_date.year, target_date.month, target_date.day, 23, 59, 59)
     before = df[df["created_at_dt"] <= end_of_day]
     
@@ -124,7 +124,6 @@ with st.sidebar:
     st.markdown("### 🛠️ Configuración")
     uploaded_file = st.file_uploader("1. Sube un CSV base para extraer los Logins", type=["csv"])
     
-    # Selector de fecha destino
     opcion = st.selectbox("2. Fecha a generar", ["Hoy (Tiempo Real)", "Fecha Pasada Personalizada"])
     
     if opcion == "Hoy (Tiempo Real)":
@@ -134,12 +133,10 @@ with st.sidebar:
         target_date = st.date_input("Selecciona la fecha histórica", value=date(2026, 5, 19))
         opcion_dia = target_date.strftime('%d/%m/%Y')
 
-# Process list base
 selected_logins = []
 if uploaded_file is not None:
     try:
         df_base = pd.read_csv(uploaded_file)
-        # Buscar columna de usuarios de forma flexible
         col_login = [c for c in df_base.columns if "login" in c.lower() or "student" in c.lower()]
         if col_login:
             selected_logins = df_base[col_login[0]].dropna().unique().tolist()
@@ -171,50 +168,57 @@ else:
             status_text.text(f"⏳ {idx+1}/{total_estudiantes} — Analizando: {login_clean}")
             progress_bar.progress((idx + 1) / total_estudiantes)
 
-            # 1. Consulta estándar del Perfil
+            # 1. Intentar consulta estándar del Perfil del usuario
             resp_user = api_get(f"https://api.intra.42.fr/v2/users/{login_clean}", headers)
             
-            # ── PARCHE: FALLBACK ANTE FALLO DE LA API O LOGIN CAMBIADO/INACTIVO ──
+            # ── SISTEMA DE FALLBACK ANTE CUALQUIER FALLO DE PERFIL (No encontrado / Caída de API) ──
             if resp_user.status_code != 200:
-                # Segundo intento directo a través de sus históricos
-                url_fallback = f"https://api.intra.42.fr/v2/users/{login_clean}/correction_point_historics?page[size]=1&sort=-created_at"
+                # Intentamos atacar directamente la ruta de históricos para recuperar su balance transaccional
+                url_fallback = f"https://api.intra.42.fr/v2/users/{login_clean}/correction_point_historics?page[size]=100&sort=-created_at"
                 resp_fb = api_get(url_fallback, headers)
                 
                 if resp_fb.status_code == 200 and resp_fb.json():
-                    # Extrae el último total conocido en el sistema transaccional
-                    ultimo_evento = resp_fb.json()[0]
-                    puntos_estimados = ultimo_evento.get("total", 0)
+                    # Si tiene históricos, construimos el dataframe simulado y aplicamos la inferencia temporal de la fecha solicitada
+                    all_fb_records = resp_fb.json()
+                    df_fb = pd.DataFrame(all_fb_records)
+                    date_col = "created_at" if "created_at" in df_fb.columns else "updated_at"
+                    df_fb["created_at_dt"] = pd.to_datetime(df_fb[date_col], utc=True, errors="coerce").dt.tz_localize(None)
+                    df_fb = df_fb.sort_values("created_at_dt", ascending=False).reset_index(drop=True)
+                    
+                    puntos_pasados = pts_on_date(df_fb, target_date)
                     resultados.append({
                         "Login": login_clean, 
-                        nombre_columna_puntos: int(puntos_estimados) if puntos_estimados else 0, 
-                        "Estatus": "OK (Último conocido via Historial)"
+                        nombre_columna_puntos: int(puntos_pasados), 
+                        "Estatus": "Recuperado via Historial"
                     })
                 else:
-                    # Forzar 0 numérico para no romper cálculos del analizador estadístico
+                    # En última instancia, si de verdad no hay rastro, ponemos 0 para no corromper la columna con textos
                     resultados.append({
                         "Login": login_clean, 
                         nombre_columna_puntos: 0, 
-                        "Estatus": "No encontrado (Asumido 0)"
+                        "Estatus": "Inaccesible (Asumido 0)"
                     })
                 continue
             
-            # 2. Si la API responde correctamente
+            # 2. Si el perfil responde correctamente
             user_data = resp_user.json()
             user_id = user_data.get("id")
             puntos_actuales = user_data.get("correction_point", 0)
+            puntos_actuales = int(puntos_actuales) if puntos_actuales is not None else 0
             
             if not user_id:
-                resultados.append({"Login": login_clean, nombre_columna_puntos: int(puntos_actuales or 0), "Estatus": "OK (Sin ID corporativo)"})
+                resultados.append({"Login": login_clean, nombre_columna_puntos: puntos_actuales, "Estatus": "OK (Perfil sin ID)"})
                 continue
 
-            # Si es el día de hoy, evitamos pedir el historial completo (Ahorro crítico de Rate Limits)
+            # Optimización crítica si la fecha solicitada es hoy
             if target_date == date.today():
-                resultados.append({"Login": login_clean, nombre_columna_puntos: int(puntos_actuales or 0), "Estatus": "OK"})
+                resultados.append({"Login": login_clean, nombre_columna_puntos: puntos_actuales, "Estatus": "OK"})
             else:
+                # Consultar historial completo del estudiante para extraer el balance de la fecha pedida
                 hist_df = fetch_full_history(user_id, headers)
                 if hist_df is None or hist_df.empty:
-                    # Si no hay eventos, significa que su balance actual es el que ha tenido siempre
-                    resultados.append({"Login": login_clean, nombre_columna_puntos: int(puntos_actuales or 0), "Estatus": "OK (Sin movimientos)"})
+                    # Si no hay transacciones registradas en su cuenta, su saldo histórico siempre ha sido su saldo actual
+                    resultados.append({"Login": login_clean, nombre_columna_puntos: puntos_actuales, "Estatus": "OK (Sin transacciones)"})
                 else:
                     puntos_pasados = pts_on_date(hist_df, target_date)
                     resultados.append({"Login": login_clean, nombre_columna_puntos: int(puntos_pasados), "Estatus": "OK"})
@@ -222,19 +226,17 @@ else:
         progress_bar.empty()
         status_text.empty()
 
-        # Guardar en persistencia de sesión de Streamlit
         st.session_state["tabla_independiente"] = pd.DataFrame(resultados)
         st.session_state["fecha_procesada_label"] = opcion_dia.split(" ")[0].replace("/", "_")
 
-    # Renderizado y descarga de la tabla generada
+    # Renderizado y descarga segura
     if "tabla_independiente" in st.session_state:
         df_resultado = st.session_state["tabla_independiente"].copy()
-        label_fecha = st.session_state["fecha_processed_label"] if "fecha_processed_label" in st.session_state else opcion_dia.split(" ")[0].replace("/", "_")
+        label_fecha = st.session_state.get("fecha_procesada_label", opcion_dia.split(" ")[0].replace("/", "_"))
         
         st.markdown('---')
         st.markdown('### 📋 Tabla de Resultados Generada')
         
-        # Formateador visual para asegurar que se vean como enteros limpios
         st.dataframe(
             df_resultado.sort_values(by=df_resultado.columns[1], ascending=False),
             use_container_width=True,
