@@ -139,15 +139,15 @@ def fetch_students(campus_id, headers, max_pages, debug):
 
             # Cadet blackholed → fuera
             if grade == "Cadet" and cu.get("blackholed_at"):
-            try:
-                now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
-                bh_dt = datetime.fromisoformat(
-                    cu["blackholed_at"].replace("Z", "+00:00")
-                ).replace(tzinfo=None)
-                if bh_dt < now_utc:  # blackhole ya ocurrió → fuera
-                    continue
-            except Exception:
-                pass  # si no puede parsear, lo deja pasar
+                try:
+                    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+                    bh_dt = datetime.fromisoformat(
+                        cu["blackholed_at"].replace("Z", "+00:00")
+                    ).replace(tzinfo=None)
+                    if bh_dt < now_utc:  # blackhole ya ocurrió → fuera
+                        continue
+                except Exception:
+                    pass  # si no puede parsear, lo deja pasar
 
             # Solo Cadet activo, Transcender, Alumni
             if grade not in KEEP_GRADES:
