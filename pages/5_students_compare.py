@@ -77,12 +77,12 @@ if not headers:
     st.stop()
 
 # ── Require students_df from directory page ───────────────────────────────────
-if "students_df" not in st.session_state or st.session_state["students_df"].empty:
-    st.warning("⚠️ Ve primero a **Students Directory** y pulsa **Cargar estudiantes**.")
+if "students_df" not in st.session_state or st.session_state["students_df_filtered"].empty:
+    st.warning("⚠️ Ve primero a **Students Directory**, aplica los filtros que quieras y pulsa **Cargar estudiantes**.")
     st.stop()
 
 # Solo kind=student
-src_df = st.session_state["students_df"].copy()
+src_df = st.session_state["students_df_filtered"].copy()
 src_df = src_df[src_df["Kind"] == "student"].reset_index(drop=True)
 
 st.info(f"✅ {len(src_df)} students cargados desde Students Directory")
