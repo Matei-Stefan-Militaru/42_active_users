@@ -260,9 +260,8 @@ if df.empty:
     st.stop()
 
 # ── Guardar vista filtrada para otras páginas ─────────────────────────────────
-# Solo se actualiza si no hay búsqueda de texto (para no guardar resultados parciales)
-if not search_q:
-    st.session_state["students_df_filtered"] = df.copy()
+# FIX: siempre guardar, independientemente de si hay búsqueda de texto
+st.session_state["students_df_filtered"] = df.copy()
 
 gc = df["Grade"].value_counts()
 kc = df["Kind"].value_counts()
