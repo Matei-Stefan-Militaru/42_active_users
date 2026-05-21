@@ -37,9 +37,7 @@ st.markdown('<div class="page-title">🎓 42 Students Directory</div>', unsafe_a
 st.markdown('<div class="page-sub">Cadets · Outercore · Transcender · Alumni — cursus 21</div>', unsafe_allow_html=True)
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
-def get_headers():
-    if "api_headers" in st.session_state:
-        return st.session_state["api_headers"]
+def get_token():
     try:
         cid  = st.secrets["api42"]["client_id"]
         csec = st.secrets["api42"]["client_secret"]
@@ -49,14 +47,26 @@ def get_headers():
             "client_secret": csec,
         }, timeout=10)
         if resp.status_code == 200:
-            token = resp.json().get("access_token")
-            headers = {"Authorization": f"Bearer {token}"}
-            st.session_state["api_headers"] = headers
-            return headers
+            return resp.json().get("access_token")
     except Exception as e:
         st.error(f"Auth error: {e}")
     return None
 
+def get_headers():
+    # Renovar token si expiró o no existe
+    token_ts = st.session_state.get("token_ts")
+    now = datetime.now(timezone.utc)
+    
+    # Renovar si no hay token o han pasado más de 90 minutos
+    if not token_ts or (now - token_ts).seconds > 5400:
+        token = get_token()
+        if token:
+            st.session_state["api_headers"] = {"Authorization": f"Bearer {token}"}
+            st.session_state["token_ts"] = now
+        else:
+            return None
+    
+    return st.session_state.get("api_headers")
 headers = get_headers()
 if not headers:
     st.error("❌ No se pudo autenticar con la API de 42. Revisa los secrets.")
