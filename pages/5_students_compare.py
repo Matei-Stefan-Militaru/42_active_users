@@ -19,29 +19,20 @@ st.markdown("""
 .page-sub   { font-family:'JetBrains Mono',monospace; font-size:0.8rem; color:var(--muted); margin-bottom:1.5rem; }
 .stat-card  { background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:1rem; text-align:center; font-family:'JetBrains Mono',monospace; }
 .stat-val   { font-size:1.8rem; font-weight:700; color:var(--accent); }
-.stat-val-green { font-size:1.8rem; font-weight:700; color:var(--green); }
-.stat-val-red   { font-size:1.8rem; font-weight:700; color:#ff4444; }
 .stat-lbl   { font-size:0.65rem; color:var(--muted); margin-top:2px; }
-.summary-box { background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:1rem 1.5rem; margin-top:0.4rem; font-family:'JetBrains Mono',monospace; }
-.summary-row { display:flex; justify-content:space-between; align-items:center; padding:0.3rem 0; border-bottom:1px solid var(--border); }
+.summary-box  { background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:1rem 1.5rem; margin-top:0.4rem; font-family:'JetBrains Mono',monospace; }
+.summary-row  { display:flex; justify-content:space-between; align-items:center; padding:0.3rem 0; border-bottom:1px solid var(--border); }
 .summary-row:last-child { border-bottom:none; }
 .summary-label { color:var(--muted); font-size:0.75rem; }
 .summary-value { font-weight:700; font-size:0.9rem; color:#e2e8f0; }
-.hist-card {
-    background:var(--surface); border:1px solid var(--border);
-    border-left:4px solid var(--accent); border-radius:8px;
-    padding:0.6rem 1.25rem; margin-bottom:0.3rem;
-    font-family:'JetBrains Mono',monospace;
-    display:flex; justify-content:space-between; align-items:center;
-}
-.hist-pos { color:var(--green); font-weight:700; }
-.hist-neg { color:#ff4444; font-weight:700; }
-.hist-zero { color:var(--muted); font-weight:700; }
+.summary-total { color:var(--green); font-size:1.1rem; }
+.section-title { font-family:'JetBrains Mono',monospace; font-size:0.9rem; font-weight:700;
+                 color:var(--accent); margin:1.25rem 0 0.6rem 0; letter-spacing:1px; }
 </style>
 """, unsafe_allow_html=True)
 
 st.markdown('<div class="page-title">🏫 Campus Eval Points</div>', unsafe_allow_html=True)
-st.markdown('<div class="page-sub">Suma total de correction points del campus — comparativa entre fechas</div>', unsafe_allow_html=True)
+st.markdown('<div class="page-sub">Comparativa de correction points — solo students</div>', unsafe_allow_html=True)
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
 def get_token():
@@ -85,367 +76,244 @@ if not headers:
     st.error("❌ No se pudo autenticar. Revisa los secrets.")
     st.stop()
 
+# ── Require students_df from directory page ───────────────────────────────────
+if "students_df" not in st.session_state or st.session_state["students_df"].empty:
+    st.warning("⚠️ Ve primero a **Students Directory** y pulsa **Cargar estudiantes**.")
+    st.stop()
+
+# Solo kind=student
+src_df = st.session_state["students_df"].copy()
+src_df = src_df[src_df["Kind"] == "student"].reset_index(drop=True)
+
+st.info(f"✅ {len(src_df)} students cargados desde Students Directory")
+
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("### 🏫 Campus Eval Points")
-
-    campus_id   = st.session_state.get("campus_id", 46)
     campus_name = st.session_state.get("selected_campus", "Barcelona")
-    st.info(f"📍 **{campus_name}** (ID {campus_id})")
+    st.info(f"📍 **{campus_name}** · {len(src_df)} students")
 
-    date1    = st.date_input("Fecha base", value=date(2026, 5, 13))
-    date2    = st.date_input("Fecha comparación", value=date.today())
-    max_pages = st.number_input("Páginas de estudiantes (100/pág)", 1, 200, 50)
-    debug    = st.checkbox("🐛 Debug", value=False)
+    date_base = st.date_input("Fecha base (pasado)", value=date(2026, 5, 13))
+    debug     = st.checkbox("🐛 Debug", value=False)
 
     st.markdown("---")
-    st.markdown("""
-    **⚠️ Nota:** Este análisis llama a la API de historial por cada estudiante.
-    Con muchos usuarios puede tardar varios minutos.
+    st.markdown(f"""
+    **Fecha base:** {date_base.strftime('%d/%m/%Y')}  
+    **Fecha actual:** puntos en API (ahora)  
+    Llamará a la API de historial de los **{len(src_df)} students**.  
+    ⏱️ Puede tardar varios minutos.
     """)
-    load_btn = st.button("🚀 Calcular", type="primary", use_container_width=True)
+    calc_btn = st.button("🚀 Calcular comparativa", type="primary", use_container_width=True)
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
-KEEP_GRADES = {"Cadet", "Outercore", "Transcender", "Alumni", "Blackholed"}
-
-def detect_grade(cu, now_utc):
-    user   = cu.get("user", {})
-    active = user.get("active?", True)
-    bh     = cu.get("blackholed_at")
-    raw    = (cu.get("grade") or "").strip()
-    if not active and bh:
-        return "Blackholed"
-    if raw:
-        return raw
-    end = cu.get("end_at")
-    if not end and not bh:
-        return "Outercore"
-    return "Sin grade"
-
-def fetch_campus_students(campus_id, headers, max_pages, debug):
-    """Devuelve lista de {user_id, login, grade, current_pts}"""
-    results = []
-    page    = 1
-    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
-
-    while page <= max_pages:
-        url = (
-            f"https://api.intra.42.fr/v2/cursus/21/cursus_users"
-            f"?filter[campus_id]={campus_id}"
-            f"&page[size]=100&page[number]={page}&sort=-updated_at"
-        )
-        resp = api_get(url, headers)
-
-        if resp.status_code == 429:
-            wait = int(resp.headers.get("Retry-After", 5))
-            time.sleep(wait)
-            continue
-        if resp.status_code != 200:
-            break
-
-        data = resp.json()
-        if not data:
-            break
-
-        for cu in data:
-            user  = cu.get("user", {})
-            if not user:
-                continue
-            grade = detect_grade(cu, now_utc)
-            if grade not in KEEP_GRADES:
-                continue
-            results.append({
-                "user_id":     user.get("id"),
-                "login":       user.get("login", ""),
-                "grade":       grade,
-                "current_pts": int(user.get("correction_point", 0) or 0),
-            })
-
-        if len(data) < 100:
-            break
-        page += 1
-
-    return results
-
+# ── Helper: puntos en fecha ───────────────────────────────────────────────────
 def get_pts_on_date(user_id, target_date, headers):
-    """
-    Devuelve los correction points de un usuario al final de target_date.
-    Usa "total" (saldo acumulado) del registro más reciente <= fin del día.
-    Devuelve None si no hay datos.
-    """
-    end_of_day = datetime(
-        target_date.year, target_date.month, target_date.day, 23, 59, 59
-    )
+    end_of_day = datetime(target_date.year, target_date.month, target_date.day, 23, 59, 59)
     page = 1
-    while page <= 10:  # máx 1000 registros por usuario
+    while page <= 15:
         url = (
             f"https://api.intra.42.fr/v2/users/{user_id}/correction_point_historics"
             f"?page[size]=100&page[number]={page}&sort=-created_at"
         )
         resp = api_get(url, headers)
-
         if resp.status_code == 429:
-            wait = int(resp.headers.get("Retry-After", 5))
-            time.sleep(wait)
+            time.sleep(int(resp.headers.get("Retry-After", 5)))
             continue
         if resp.status_code != 200:
             return None
-
         records = resp.json()
         if not records:
             return None
-
         for rec in records:
-            created_raw = rec.get("created_at", "")
             try:
-                created_dt = datetime.fromisoformat(
-                    created_raw.replace("Z", "+00:00")
-                ).replace(tzinfo=None)
+                dt = datetime.fromisoformat(rec["created_at"].replace("Z", "+00:00")).replace(tzinfo=None)
             except Exception:
                 continue
-
-            if created_dt <= end_of_day:
-                # Primer registro en orden desc que cae antes del fin del día
+            if dt <= end_of_day:
                 total = rec.get("total")
-                if total is not None:
-                    return int(total)
-                return None
-
-        # Todos los registros de esta página son posteriores a end_of_day
-        # Si el último de la página ya es anterior, habremos encontrado antes
-        # Si no, buscar en la página siguiente
-        last_raw = records[-1].get("created_at", "")
+                return int(total) if total is not None else None
         try:
             last_dt = datetime.fromisoformat(
-                last_raw.replace("Z", "+00:00")
+                records[-1]["created_at"].replace("Z", "+00:00")
             ).replace(tzinfo=None)
         except Exception:
             break
-
-        if last_dt <= end_of_day:
-            # Ya deberíamos haber encontrado algo en esta página, no hay datos
-            return None
-
+        if last_dt <= end_of_day or len(records) < 100:
+            break
         page += 1
-
     return None
 
-# ── Load ──────────────────────────────────────────────────────────────────────
-if load_btn:
-    # 1. Cargar lista de estudiantes
-    with st.spinner("📋 Cargando lista de estudiantes del campus…"):
-        students = fetch_campus_students(campus_id, headers, max_pages, debug)
+# ── Render summary (same style as students directory) ─────────────────────────
+def render_summary(df, title):
+    total = int(df["Eval Points"].sum())
+    avg   = df["Eval Points"].mean()
+    mx    = int(df["Eval Points"].max())
+    mn    = int(df["Eval Points"].min())
+    top   = df.loc[df["Eval Points"].idxmax(), "Login"]
 
-    if not students:
-        st.error("❌ No se pudieron cargar los estudiantes.")
-        st.stop()
+    st.markdown(f'<div class="section-title">💰 {title}</div>', unsafe_allow_html=True)
+    st.markdown(f"""
+    <div class="summary-box">
+      <div class="summary-row">
+        <span class="summary-label">TOTAL PUNTOS</span>
+        <span class="summary-value summary-total">{total:,}</span>
+      </div>
+      <div class="summary-row">
+        <span class="summary-label">MEDIA POR ESTUDIANTE</span>
+        <span class="summary-value">{avg:.1f} pts</span>
+      </div>
+      <div class="summary-row">
+        <span class="summary-label">MÁXIMO</span>
+        <span class="summary-value">{mx} pts — {top}</span>
+      </div>
+      <div class="summary-row">
+        <span class="summary-label">MÍNIMO</span>
+        <span class="summary-value">{mn} pts</span>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
 
-    st.info(f"👥 {len(students)} estudiantes encontrados. Calculando historial de puntos…")
+    st.markdown("<br><b style='color:#e2e8f0;font-family:JetBrains Mono,monospace;font-size:0.8rem'>POR GRADE</b>", unsafe_allow_html=True)
+    for _, row in (
+        df.groupby("Grade")["Eval Points"]
+        .agg(["sum", "mean", "count"])
+        .reset_index()
+        .sort_values("sum", ascending=False)
+        .iterrows()
+    ):
+        st.markdown(
+            f'<div class="summary-box"><div class="summary-row">'
+            f'<span class="summary-label">{row["Grade"]} &nbsp;·&nbsp; {int(row["count"])} est.</span>'
+            f'<span class="summary-value">Total: {int(row["sum"]):,} pts &nbsp;·&nbsp; Media: {row["mean"]:.1f} pts</span>'
+            f'</div></div>',
+            unsafe_allow_html=True
+        )
 
-    # 2. Para cada estudiante, obtener pts en date1 y date2
-    results = []
-    bar     = st.progress(0, text="Procesando usuarios…")
-    status  = st.empty()
-    total   = len(students)
+# ── Calculate ─────────────────────────────────────────────────────────────────
+if calc_btn:
+    bar    = st.progress(0, text="Procesando usuarios…")
+    status = st.empty()
+    total  = len(src_df)
+    pts_base = {}
 
-    for i, s in enumerate(students):
-        status.text(f"⏳ {i+1}/{total} — {s['login']}")
+    for i, row in src_df.iterrows():
+        login   = row["Login"]
+        # We need user_id — fetch from API using login
+        status.text(f"⏳ {i+1}/{total} — {login}")
         bar.progress((i + 1) / total)
 
-        pts1 = get_pts_on_date(s["user_id"], date1, headers)
-        pts2 = get_pts_on_date(s["user_id"], date2, headers)
+        # Get user_id
+        resp = api_get(f"https://api.intra.42.fr/v2/users/{login}", headers)
+        if resp.status_code != 200:
+            pts_base[login] = None
+            continue
+        user_id = resp.json().get("id")
+        if not user_id:
+            pts_base[login] = None
+            continue
 
-        results.append({
-            "login":       s["login"],
-            "grade":       s["grade"],
-            "current_pts": s["current_pts"],
-            "pts_date1":   pts1,   # None = sin historial en esa fecha
-            "pts_date2":   pts2,
-        })
+        pts_base[login] = get_pts_on_date(user_id, date_base, headers)
 
     bar.empty()
     status.empty()
 
-    df = pd.DataFrame(results)
-    st.session_state["campus_eval_df"]    = df
-    st.session_state["campus_eval_date1"] = date1
-    st.session_state["campus_eval_date2"] = date2
-    st.success(f"✅ Listo — {len(df)} usuarios procesados")
+    src_df["pts_base"] = src_df["Login"].map(pts_base)
+
+    st.session_state["cep_df"]        = src_df
+    st.session_state["cep_date_base"] = date_base
+    st.success(f"✅ Listo — {len(src_df)} usuarios procesados")
 
 # ── Guard ─────────────────────────────────────────────────────────────────────
-if "campus_eval_df" not in st.session_state:
-    st.info("👆 Configura las fechas y pulsa **Calcular** para empezar.")
-    st.markdown("""
-    **Qué hace esta página:**
-    - Carga todos los estudiantes activos del campus
-    - Para cada uno, busca su saldo de correction points en **Fecha base** y **Fecha comparación**
-    - Muestra la suma total del campus en cada fecha y la variación
-    """)
+if "cep_df" not in st.session_state:
+    st.info("👆 Selecciona la fecha base y pulsa **Calcular comparativa**.")
     st.stop()
 
-df    = st.session_state["campus_eval_df"].copy()
-date1 = st.session_state["campus_eval_date1"]
-date2 = st.session_state["campus_eval_date2"]
+df        = st.session_state["cep_df"].copy()
+date_base = st.session_state["cep_date_base"]
 
-# ── Calcular totales ──────────────────────────────────────────────────────────
-# Usuarios con datos en ambas fechas (para comparativa justa)
-df_both = df.dropna(subset=["pts_date1", "pts_date2"])
-df_d1   = df.dropna(subset=["pts_date1"])
-df_d2   = df.dropna(subset=["pts_date2"])
+# ── HOY — puntos actuales (ya en src_df como "Eval Points") ──────────────────
+st.markdown("---")
+col1, col2 = st.columns(2)
 
-total_current = int(df["current_pts"].sum())
-total_d1      = int(df_d1["pts_date1"].sum())
-total_d2      = int(df_d2["pts_date2"].sum())
-diff          = total_d2 - total_d1
-diff_sign     = "+" if diff >= 0 else ""
-diff_color    = "#00ff88" if diff >= 0 else "#ff4444"
+with col1:
+    render_summary(df, f"HOY — EVALUATION POINTS")
 
-# Usuarios sin historial (se incorporaron después o sin datos)
-no_data_d1 = len(df) - len(df_d1)
-no_data_d2 = len(df) - len(df_d2)
+# ── FECHA BASE — construir df equivalente con pts_base ───────────────────────
+df_base = df.dropna(subset=["pts_base"]).copy()
+df_base["Eval Points"] = df_base["pts_base"].astype(int)
+no_data = len(df) - len(df_base)
 
-# ── Header ────────────────────────────────────────────────────────────────────
-st.markdown(f"### 📍 {st.session_state.get('selected_campus','Campus')} — Correction Points")
+with col2:
+    if df_base.empty:
+        st.warning("Sin datos históricos para esa fecha.")
+    else:
+        render_summary(df_base, f"{date_base.strftime('%d/%m/%Y')} — EVALUATION POINTS")
+        if no_data > 0:
+            st.caption(f"ℹ️ {no_data} usuarios sin historial en esa fecha (no incluidos en la columna base)")
 
-# ── Stats principales ─────────────────────────────────────────────────────────
-cards = [
-    (total_current,          "PUNTOS HOY (API)",          "var(--accent)"),
-    (total_d1,               f"TOTAL {date1.strftime('%d/%m/%Y')}", "var(--accent)"),
-    (total_d2,               f"TOTAL {date2.strftime('%d/%m/%Y')}", "var(--accent)"),
-    (f"{diff_sign}{diff}",   "VARIACIÓN",                 diff_color),
-    (len(df),                "USUARIOS",                  "var(--muted)"),
-]
-c1, c2, c3, c4, c5 = st.columns(5)
-for col, (val, lbl, color) in zip([c1, c2, c3, c4, c5], cards):
-    v = f"{val:,}" if isinstance(val, int) else str(val)
+# ── Variación ─────────────────────────────────────────────────────────────────
+st.markdown("---")
+st.markdown('<div class="section-title">📈 VARIACIÓN</div>', unsafe_allow_html=True)
+
+df_both = df.dropna(subset=["pts_base"]).copy()
+df_both["variacion"] = df_both["Eval Points"] - df_both["pts_base"].astype(int)
+
+total_now  = int(df["Eval Points"].sum())
+total_base = int(df_both["pts_base"].sum())
+diff       = total_now - total_base
+sign       = "+" if diff >= 0 else ""
+color      = "#00ff88" if diff >= 0 else "#ff4444"
+
+c1, c2, c3, c4 = st.columns(4)
+for col, (val, lbl, clr) in zip([c1, c2, c3, c4], [
+    (f"{total_base:,}", f"TOTAL {date_base.strftime('%d/%m/%Y')}", "var(--accent)"),
+    (f"{total_now:,}",  "TOTAL HOY",                               "var(--accent)"),
+    (f"{sign}{diff:,}", "VARIACIÓN",                               color),
+    (len(df_both),      "USUARIOS CON DATOS",                      "var(--muted)"),
+]):
     col.markdown(
-        f'<div class="stat-card"><div class="stat-val" style="color:{color}">{v}</div>'
+        f'<div class="stat-card"><div class="stat-val" style="color:{clr}">{val}</div>'
         f'<div class="stat-lbl">{lbl}</div></div>',
         unsafe_allow_html=True
     )
 
-st.markdown(
-    f"<br><small style='color:var(--muted);font-family:JetBrains Mono,monospace'>"
-    f"Sin historial en {date1.strftime('%d/%m')}: {no_data_d1} usuarios · "
-    f"Sin historial en {date2.strftime('%d/%m')}: {no_data_d2} usuarios</small>",
-    unsafe_allow_html=True
-)
-
-st.markdown("---")
-
-# ── Por grade ─────────────────────────────────────────────────────────────────
-st.markdown("### 📊 Por Grade")
-
-grade_rows = []
-for grade, gdf in df.groupby("grade"):
-    g1 = int(gdf["pts_date1"].dropna().sum())
-    g2 = int(gdf["pts_date2"].dropna().sum())
-    gd = g2 - g1
-    grade_rows.append({
-        "Grade":   grade,
-        "Usuarios": len(gdf),
-        f"Total {date1.strftime('%d/%m')}": g1,
-        f"Total {date2.strftime('%d/%m')}": g2,
-        "Variación": gd,
-    })
-
-grade_df = pd.DataFrame(grade_rows).sort_values("Variación", ascending=False)
-
-for _, row in grade_df.iterrows():
-    vd   = row["Variación"]
-    sign = "+" if vd >= 0 else ""
-    col  = "#00ff88" if vd >= 0 else "#ff4444"
-    lbl1 = f"Total {date1.strftime('%d/%m')}"
-    lbl2 = f"Total {date2.strftime('%d/%m')}"
-    v1   = f"{row[lbl1]:,}"
-    v2   = f"{row[lbl2]:,}"
-    d1s  = date1.strftime('%d/%m')
-    d2s  = date2.strftime('%d/%m')
-    st.markdown(f"""
-    <div class="hist-card">
-        <div>
-            <span style="color:#e2e8f0;font-weight:700">{row['Grade']}</span>
-            <span style="color:var(--muted);font-size:0.75rem"> · {row['Usuarios']} usuarios</span>
-        </div>
-        <div style="text-align:right;font-size:0.85rem">
-            <span style="color:var(--muted)">{d1s}: <b style="color:#e2e8f0">{v1}</b></span>
-            &nbsp;→&nbsp;
-            <span style="color:var(--muted)">{d2s}: <b style="color:#e2e8f0">{v2}</b></span>
-            &nbsp;&nbsp;
-            <b style="color:{col}">{sign}{vd:,} pts</b>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-st.markdown("---")
-
-# ── Top movers ────────────────────────────────────────────────────────────────
-st.markdown("### 🏆 Top movers (usuarios con mayor variación)")
-
-df_both = df.dropna(subset=["pts_date1", "pts_date2"]).copy()
-df_both["variacion"] = df_both["pts_date2"].astype(int) - df_both["pts_date1"].astype(int)
-
+# Top movers
+st.markdown("<br>", unsafe_allow_html=True)
 col_a, col_b = st.columns(2)
 
 with col_a:
     st.markdown("**📈 Mayores ganancias**")
-    top_gainers = df_both.nlargest(15, "variacion")
-    for _, row in top_gainers.iterrows():
+    for _, row in df_both.nlargest(10, "variacion").iterrows():
         v = int(row["variacion"])
-        if v == 0:
+        if v <= 0:
             continue
-        st.markdown(f"""
-        <div class="hist-card">
-            <div>
-                <span style="color:#e2e8f0">{row['login']}</span>
-                <span style="color:var(--muted);font-size:0.7rem"> · {row['grade']}</span>
-            </div>
-            <div class="hist-pos">+{v} pts</div>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="summary-box"><div class="summary-row">'
+            f'<span class="summary-label">{row["Login"]} · {row["Grade"]}</span>'
+            f'<span class="summary-value" style="color:#00ff88">+{v} pts</span>'
+            f'</div></div>',
+            unsafe_allow_html=True
+        )
 
 with col_b:
     st.markdown("**📉 Mayores pérdidas**")
-    top_losers = df_both.nsmallest(15, "variacion")
-    for _, row in top_losers.iterrows():
+    for _, row in df_both.nsmallest(10, "variacion").iterrows():
         v = int(row["variacion"])
-        if v == 0:
+        if v >= 0:
             continue
-        st.markdown(f"""
-        <div class="hist-card">
-            <div>
-                <span style="color:#e2e8f0">{row['login']}</span>
-                <span style="color:var(--muted);font-size:0.7rem"> · {row['grade']}</span>
-            </div>
-            <div class="hist-neg">{v} pts</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-st.markdown("---")
-
-# ── Tabla completa ────────────────────────────────────────────────────────────
-st.markdown("### 📋 Tabla completa")
-
-df_show = df.copy()
-df_show["variacion"] = (df_show["pts_date2"].fillna(0) - df_show["pts_date1"].fillna(0)).astype(int)
-df_show = df_show.rename(columns={
-    "login":       "Login",
-    "grade":       "Grade",
-    "current_pts": "Pts actuales",
-    "pts_date1":   f"Pts {date1.strftime('%d/%m')}",
-    "pts_date2":   f"Pts {date2.strftime('%d/%m')}",
-    "variacion":   "Variación",
-})
-df_show = df_show.sort_values("Variación", ascending=False)
-
-st.dataframe(
-    df_show,
-    use_container_width=True,
-    hide_index=True,
-    height=500,
-)
+        st.markdown(
+            f'<div class="summary-box"><div class="summary-row">'
+            f'<span class="summary-label">{row["Login"]} · {row["Grade"]}</span>'
+            f'<span class="summary-value" style="color:#ff4444">{v} pts</span>'
+            f'</div></div>',
+            unsafe_allow_html=True
+        )
 
 # ── Export ────────────────────────────────────────────────────────────────────
 st.markdown("---")
-csv = df_show.to_csv(index=False).encode("utf-8")
+export = df_both[["Login", "Grade", "Eval Points", "pts_base", "variacion"]].rename(columns={
+    "Eval Points": "Pts hoy",
+    "pts_base":    f"Pts {date_base.strftime('%d/%m/%Y')}",
+    "variacion":   "Variación",
+})
+csv = export.to_csv(index=False).encode("utf-8")
 st.download_button("⬇️ Exportar CSV", csv, "campus_eval_points.csv", "text/csv")
