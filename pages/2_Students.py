@@ -107,21 +107,24 @@ with st.sidebar:
 # ── Grade detection ───────────────────────────────────────────────────────────
 def detect_grade(cu: dict, now_utc: datetime) -> str:
     raw = (cu.get("grade") or "").strip()
-    if raw:
-        return raw  # Cadet, Transcender, Alumni...
-
     bh  = cu.get("blackholed_at")
-    end = cu.get("end_at")
 
+    # Si tiene blackholed_at en el pasado → Blackholed, independientemente del grade
     if bh:
         try:
             bh_dt = datetime.fromisoformat(bh.replace("Z", "+00:00")).replace(tzinfo=None)
             if bh_dt < now_utc:
                 return "Blackholed"
         except Exception:
-            return "Blackholed"
+            pass
+
+    if raw:
+        return raw  # Cadet, Transcender, Alumni
+
+    end = cu.get("end_at")
     if not end and not bh:
         return "Outercore"
+
     return "Sin grade"
 
 # ── Fetch ─────────────────────────────────────────────────────────────────────
