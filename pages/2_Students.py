@@ -17,7 +17,7 @@ st.markdown("""
 .stat-card  { background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:1rem; text-align:center; font-family:'JetBrains Mono',monospace; }
 .stat-val   { font-size:1.8rem; font-weight:700; color:var(--accent); }
 .stat-lbl   { font-size:0.65rem; color:var(--muted); margin-top:2px; }
-.summary-box { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:1.5rem 2rem; margin-top:1.5rem; font-family:'JetBrains Mono',monospace; }
+.summary-box { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:1.5rem 2rem; margin-top:0.75rem; font-family:'JetBrains Mono',monospace; }
 .summary-title { font-size:1rem; font-weight:700; color:var(--accent); margin-bottom:1rem; }
 .summary-row { display:flex; justify-content:space-between; align-items:center; padding:0.4rem 0; border-bottom:1px solid var(--border); }
 .summary-row:last-child { border-bottom:none; }
@@ -28,7 +28,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown('<div class="page-title">🎓 42 Students Directory</div>', unsafe_allow_html=True)
-st.markdown('<div class="page-sub">Cadets activos · Transcender · Alumni — cursus 21</div>', unsafe_allow_html=True)
+st.markdown('<div class="page-sub">Cadets · Outercore · Transcender · Alumni — cursus 21</div>', unsafe_allow_html=True)
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
 def get_headers():
@@ -70,8 +70,8 @@ with st.sidebar:
     search_q       = st.text_input("🔍 Buscar login / nombre")
     grade_filter   = st.multiselect(
         "Filtrar por grade",
-        ["Cadet", "Transcender", "Alumni"],
-        default=["Cadet", "Transcender", "Alumni"]
+        ["Cadet", "Outercore", "Transcender", "Alumni"],
+        default=["Cadet", "Outercore", "Transcender", "Alumni"]
     )
     debug    = st.checkbox("🐛 Debug", value=False)
     load_btn = st.button("🚀 Cargar estudiantes", type="primary", use_container_width=True)
@@ -80,7 +80,7 @@ with st.sidebar:
 def detect_grade(cu: dict) -> str:
     raw_grade = (cu.get("grade") or "").strip()
     if raw_grade:
-        return raw_grade  # Cadet, Alumni, Transcender, Member, etc.
+        return raw_grade  # Cadet, Transcender, Alumni, etc.
 
     bh  = cu.get("blackholed_at")
     end = cu.get("end_at")
@@ -92,7 +92,7 @@ def detect_grade(cu: dict) -> str:
     return "Sin grade"
 
 # ── Fetch ─────────────────────────────────────────────────────────────────────
-KEEP_GRADES = {"Cadet", "Transcender", "Alumni"}
+KEEP_GRADES = {"Cadet", "Outercore", "Transcender", "Alumni"}
 
 def fetch_students(campus_id, headers, max_pages, debug):
     results = []
@@ -137,19 +137,18 @@ def fetch_students(campus_id, headers, max_pages, debug):
 
             grade = detect_grade(cu)
 
-            # Cadet blackholed → fuera
+            # Cadet: descartar solo si el blackhole ya ocurrió (fecha pasada)
             if grade == "Cadet" and cu.get("blackholed_at"):
                 try:
-                    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
                     bh_dt = datetime.fromisoformat(
                         cu["blackholed_at"].replace("Z", "+00:00")
                     ).replace(tzinfo=None)
-                    if bh_dt < now_utc:  # blackhole ya ocurrió → fuera
-                        continue
+                    if bh_dt < now_utc:
+                        continue  # blackhole ya pasó → fuera
                 except Exception:
-                    pass  # si no puede parsear, lo deja pasar
+                    pass
 
-            # Solo Cadet activo, Transcender, Alumni
+            # Solo los grades que nos interesan
             if grade not in KEEP_GRADES:
                 continue
 
@@ -239,14 +238,15 @@ if df.empty:
 # ── Stats ─────────────────────────────────────────────────────────────────────
 grade_counts = df["Grade"].value_counts()
 
-c1, c2, c3, c4, c5, c6 = st.columns(6)
+c1, c2, c3, c4, c5, c6, c7 = st.columns(7)
 for col, (val, lbl) in zip(
-    [c1, c2, c3, c4, c5, c6],
+    [c1, c2, c3, c4, c5, c6, c7],
     [
         (len(df),                              "TOTAL"),
         ((df["In Campus"] == "🟢").sum(),      "EN CAMPUS"),
         (f"{df['Level'].mean():.1f}",          "NIVEL ⌀"),
         (grade_counts.get("Cadet", 0),         "CADETS"),
+        (grade_counts.get("Outercore", 0),     "OUTERCORE"),
         (grade_counts.get("Transcender", 0),   "TRANSCENDER"),
         (grade_counts.get("Alumni", 0),        "ALUMNI"),
     ]
@@ -295,14 +295,11 @@ st.dataframe(
 st.markdown("---")
 st.markdown("### 📊 Resumen de Evaluation Points")
 
-total_eval    = int(df["Eval Points"].sum())
-avg_eval      = df["Eval Points"].mean()
-max_eval      = int(df["Eval Points"].max())
-min_eval      = int(df["Eval Points"].min())
-top_user      = df.loc[df["Eval Points"].idxmax(), "Login"] if not df.empty else "—"
-
-# Por grade
-eval_by_grade = df.groupby("Grade")["Eval Points"].agg(["sum", "mean", "count"]).reset_index()
+total_eval = int(df["Eval Points"].sum())
+avg_eval   = df["Eval Points"].mean()
+max_eval   = int(df["Eval Points"].max())
+min_eval   = int(df["Eval Points"].min())
+top_user   = df.loc[df["Eval Points"].idxmax(), "Login"] if not df.empty else "—"
 
 st.markdown(f"""
 <div class="summary-box">
@@ -328,16 +325,20 @@ st.markdown(f"""
 
 # Desglose por grade
 st.markdown("<br>**Desglose por grade:**", unsafe_allow_html=True)
+eval_by_grade = df.groupby("Grade")["Eval Points"].agg(["sum", "mean", "count"]).reset_index()
+eval_by_grade = eval_by_grade.sort_values("sum", ascending=False)
+
 for _, row in eval_by_grade.iterrows():
     g     = row["Grade"]
     total = int(row["sum"])
     avg   = row["mean"]
     count = int(row["count"])
     st.markdown(
-        f'<div class="summary-box" style="margin-top:0.5rem;">'
-        f'<div class="summary-row"><span class="summary-label">{g} ({count} estudiantes)</span>'
-        f'<span class="summary-value">Total: {total:,} pts · Media: {avg:.1f} pts</span></div>'
-        f'</div>',
+        f'<div class="summary-box">'
+        f'<div class="summary-row">'
+        f'<span class="summary-label">{g} ({count} estudiantes)</span>'
+        f'<span class="summary-value">Total: {total:,} pts &nbsp;·&nbsp; Media: {avg:.1f} pts</span>'
+        f'</div></div>',
         unsafe_allow_html=True
     )
 
