@@ -84,7 +84,6 @@ if (
     st.warning("⚠️ Ve primero a **Students Directory**, aplica los filtros que quieras y pulsa **Cargar estudiantes**.")
     st.stop()
 
-# Solo kind=student
 src_df = st.session_state["students_df_filtered"].copy()
 src_df = src_df[src_df["Kind"] == "student"].reset_index(drop=True)
 
@@ -93,6 +92,10 @@ if src_df.empty:
     st.stop()
 
 st.info(f"✅ {len(src_df)} students cargados desde Students Directory")
+
+# ── Fixed dates ───────────────────────────────────────────────────────────────
+DATE_1 = date(2026, 2, 19)
+DATE_2 = date(2026, 2, 24)
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -110,7 +113,7 @@ with st.sidebar:
 
     st.markdown("---")
     st.markdown(f"""
-    Se consultará el historial de **{len(src_df)} students** para:
+    Se consultará el historial completo de **{len(src_df)} students** para:
     - 19/02/2026
     - 24/02/2026
     - {date_base.strftime('%d/%m/%Y')}
@@ -120,15 +123,12 @@ with st.sidebar:
     """)
     calc_btn = st.button("🚀 Calcular comparativa", type="primary", use_container_width=True)
 
-# ── Fixed dates ───────────────────────────────────────────────────────────────
-DATE_1 = date(2026, 2, 19)
-DATE_2 = date(2026, 2, 24)
-
-# ── Helper: puntos en fecha ───────────────────────────────────────────────────
-def get_pts_on_date(user_id, target_date, headers):
-    end_of_day = datetime(target_date.year, target_date.month, target_date.day, 23, 59, 59)
+# ── Fetch historial completo de un usuario ────────────────────────────────────
+def fetch_full_history(user_id, headers):
+    """Descarga todo el historial de correction_point_historics y devuelve DataFrame."""
+    all_records = []
     page = 1
-    while page <= 15:
+    while True:
         url = (
             f"https://api.intra.42.fr/v2/users/{user_id}/correction_point_historics"
             f"?page[size]=100&page[number]={page}&sort=-created_at"
@@ -138,28 +138,92 @@ def get_pts_on_date(user_id, target_date, headers):
             time.sleep(int(resp.headers.get("Retry-After", 5)))
             continue
         if resp.status_code != 200:
-            return None
-        records = resp.json()
-        if not records:
-            return None
-        for rec in records:
-            try:
-                dt = datetime.fromisoformat(rec["created_at"].replace("Z", "+00:00")).replace(tzinfo=None)
-            except Exception:
-                continue
-            if dt <= end_of_day:
-                total = rec.get("total")
-                return int(total) if total is not None else None
-        try:
-            last_dt = datetime.fromisoformat(
-                records[-1]["created_at"].replace("Z", "+00:00")
-            ).replace(tzinfo=None)
-        except Exception:
             break
-        if last_dt <= end_of_day or len(records) < 100:
+        data = resp.json()
+        if not data:
+            break
+        all_records.extend(data)
+        if len(data) < 100:
             break
         page += 1
-    return None
+
+    if not all_records:
+        return None
+
+    df = pd.DataFrame(all_records)
+    df["created_at_dt"] = pd.to_datetime(
+        df.get("created_at", df.get("updated_at")),
+        utc=True, errors="coerce"
+    ).dt.tz_localize(None)
+    df = df.sort_values("created_at_dt", ascending=False).reset_index(drop=True)
+    return df
+
+# ── Puntos en una fecha dada a partir del historial ya descargado ─────────────
+def pts_on_date(hist_df, target_date):
+    """Dado el historial completo, devuelve el saldo en target_date (fin del día)."""
+    end_of_day = datetime(target_date.year, target_date.month, target_date.day, 23, 59, 59)
+    filtered = hist_df[hist_df["created_at_dt"] <= end_of_day]
+    if filtered.empty:
+        return None
+    row = filtered.iloc[0]  # el más reciente antes del fin del día
+    total = row.get("total")
+    return int(total) if total is not None and pd.notna(total) else None
+
+# ── Calculate ─────────────────────────────────────────────────────────────────
+if calc_btn:
+    bar    = st.progress(0, text="Procesando usuarios…")
+    status = st.empty()
+    total  = len(src_df)
+
+    pts_d1   = {}
+    pts_d2   = {}
+    pts_base_map = {}
+
+    for i, row in src_df.iterrows():
+        login = row["Login"]
+        status.text(f"⏳ {i+1}/{total} — {login}")
+        bar.progress((i + 1) / total)
+
+        # Obtener user_id
+        resp = api_get(f"https://api.intra.42.fr/v2/users/{login}", headers)
+        if resp.status_code != 200:
+            pts_d1[login] = pts_d2[login] = pts_base_map[login] = None
+            continue
+        user_id = resp.json().get("id")
+        if not user_id:
+            pts_d1[login] = pts_d2[login] = pts_base_map[login] = None
+            continue
+
+        # Descargar historial completo UNA sola vez
+        hist_df = fetch_full_history(user_id, headers)
+
+        if hist_df is None:
+            pts_d1[login] = pts_d2[login] = pts_base_map[login] = None
+            continue
+
+        # Consultar las 3 fechas contra el mismo historial
+        pts_d1[login]        = pts_on_date(hist_df, DATE_1)
+        pts_d2[login]        = pts_on_date(hist_df, DATE_2)
+        pts_base_map[login]  = pts_on_date(hist_df, date_base)
+
+    bar.empty()
+    status.empty()
+
+    src_df["pts_19_02"] = src_df["Login"].map(pts_d1)
+    src_df["pts_24_02"] = src_df["Login"].map(pts_d2)
+    src_df["pts_base"]  = src_df["Login"].map(pts_base_map)
+
+    st.session_state["cep_df"]        = src_df
+    st.session_state["cep_date_base"] = date_base
+    st.success(f"✅ Listo — {len(src_df)} usuarios procesados")
+
+# ── Guard ─────────────────────────────────────────────────────────────────────
+if "cep_df" not in st.session_state:
+    st.info("👆 Selecciona la fecha base y pulsa **Calcular comparativa**.")
+    st.stop()
+
+df        = st.session_state["cep_df"].copy()
+date_base = st.session_state["cep_date_base"]
 
 # ── Render summary ─────────────────────────────────────────────────────────────
 def render_summary(df, col_pts, title):
@@ -212,54 +276,6 @@ def render_summary(df, col_pts, title):
             f'</div></div>',
             unsafe_allow_html=True
         )
-
-# ── Calculate ─────────────────────────────────────────────────────────────────
-if calc_btn:
-    bar    = st.progress(0, text="Procesando usuarios…")
-    status = st.empty()
-    total  = len(src_df)
-
-    pts_d1   = {}
-    pts_d2   = {}
-    pts_base = {}
-
-    for i, row in src_df.iterrows():
-        login = row["Login"]
-        status.text(f"⏳ {i+1}/{total} — {login}")
-        bar.progress((i + 1) / total)
-
-        # Get user_id
-        resp = api_get(f"https://api.intra.42.fr/v2/users/{login}", headers)
-        if resp.status_code != 200:
-            pts_d1[login] = pts_d2[login] = pts_base[login] = None
-            continue
-        user_id = resp.json().get("id")
-        if not user_id:
-            pts_d1[login] = pts_d2[login] = pts_base[login] = None
-            continue
-
-        pts_d1[login]   = get_pts_on_date(user_id, DATE_1,    headers)
-        pts_d2[login]   = get_pts_on_date(user_id, DATE_2,    headers)
-        pts_base[login] = get_pts_on_date(user_id, date_base, headers)
-
-    bar.empty()
-    status.empty()
-
-    src_df["pts_19_02"] = src_df["Login"].map(pts_d1)
-    src_df["pts_24_02"] = src_df["Login"].map(pts_d2)
-    src_df["pts_base"]  = src_df["Login"].map(pts_base)
-
-    st.session_state["cep_df"]        = src_df
-    st.session_state["cep_date_base"] = date_base
-    st.success(f"✅ Listo — {len(src_df)} usuarios procesados")
-
-# ── Guard ─────────────────────────────────────────────────────────────────────
-if "cep_df" not in st.session_state:
-    st.info("👆 Selecciona la fecha base y pulsa **Calcular comparativa**.")
-    st.stop()
-
-df        = st.session_state["cep_df"].copy()
-date_base = st.session_state["cep_date_base"]
 
 # ── Summaries — 4 columnas ────────────────────────────────────────────────────
 st.markdown("---")
