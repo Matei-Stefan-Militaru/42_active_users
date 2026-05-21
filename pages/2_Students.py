@@ -103,19 +103,6 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("### 📥 Descargar Usernames")
     
-    # Filtramos para quedarnos SOLO con los que NO están en el Black Hole
-    df_activos = df[df["Grade"] != "Blackholed"]
-    logins_activos = "\n".join(df_activos["Login"].dropna().tolist())
-    
-    st.download_button(
-        label=f"🎓 Descargar Activos ({len(df_activos)})",
-        data=logins_activos,
-        file_name=f"logins_cursus_activo_{datetime.now().strftime('%Y%m%d')}.txt",
-        mime="text/plain",
-        use_container_width=True,
-        disabled=len(df_activos) == 0
-    )
-    
 # ── Grade detection ───────────────────────────────────────────────────────────
 def detect_grade(cu: dict, now_utc: datetime) -> str:
     user   = cu.get("user", {})
@@ -270,22 +257,17 @@ with st.sidebar:
     logins_today = "\n".join(df_today["Login"].dropna().tolist())
     logins_feb19 = "\n".join(df_feb19["Login"].dropna().tolist())
     
-    st.download_button(
-        label=f"📅 Activos hoy ({len(df_today)})",
-        data=logins_today,
-        file_name=f"activos_hoy_{today_date}.txt",
-        mime="text/plain",
-        use_container_width=True,
-        disabled=len(df_today) == 0
-    )
+     # Filtramos para quedarnos SOLO con los que NO están en el Black Hole
+    df_activos = df[df["Grade"] != "Blackholed"]
+    logins_activos = "\n".join(df_activos["Login"].dropna().tolist())
     
     st.download_button(
-        label=f"📅 Activos el 19.02 ({len(df_feb19)})",
-        data=logins_feb19,
-        file_name=f"activos_19_02_{current_year}.txt",
+        label=f"🎓 Descargar Activos ({len(df_activos)})",
+        data=logins_activos,
+        file_name=f"logins_cursus_activo_{datetime.now().strftime('%Y%m%d')}.txt",
         mime="text/plain",
         use_container_width=True,
-        disabled=len(df_feb19) == 0
+        disabled=len(df_activos) == 0
     )
 
 # ── Filters ───────────────────────────────────────────────────────────────────
