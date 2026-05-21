@@ -34,7 +34,7 @@ st.markdown("""
 st.markdown('<div class="page-title">🎓 42 Students Directory</div>', unsafe_allow_html=True)
 st.markdown('<div class="page-sub">Cadets · Outercore · Transcender · Alumni · Blackholed — cursus 21</div>', unsafe_allow_html=True)
 
-# ── Auth con auto-renovación ──────────────────────────────────────────────────
+# ── Auth ──────────────────────────────────────────────────────────────────────
 def get_token():
     try:
         cid  = st.secrets["api42"]["client_id"]
@@ -54,19 +54,16 @@ def get_token():
 def get_headers(force=False):
     token_ts = st.session_state.get("token_ts")
     now      = datetime.now(timezone.utc)
-    expired  = not token_ts or (now - token_ts).total_seconds() > 5400  # 90 min
-
+    expired  = not token_ts or (now - token_ts).total_seconds() > 5400
     if force or expired or "api_headers" not in st.session_state:
         token = get_token()
         if not token:
             return None
         st.session_state["api_headers"] = {"Authorization": f"Bearer {token}"}
         st.session_state["token_ts"]    = now
-
     return st.session_state["api_headers"]
 
 def api_get(url, headers):
-    """GET con re-intento automático si el token expiró."""
     resp = requests.get(url, headers=headers, timeout=20)
     if resp.status_code == 401:
         headers = get_headers(force=True)
@@ -76,7 +73,7 @@ def api_get(url, headers):
 
 headers = get_headers()
 if not headers:
-    st.error("❌ No se pudo autenticar con la API de 42. Revisa los secrets.")
+    st.error("❌ No se pudo autenticar. Revisa los secrets.")
     st.stop()
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
@@ -90,7 +87,7 @@ with st.sidebar:
     grade_filter = st.multiselect(
         "Grade",
         ["Cadet", "Outercore", "Transcender", "Alumni", "Blackholed"],
-        default=["Cadet", "Outercore", "Transcender", "Alumni", "Blackholed"]
+        default=["Cadet", "Outercore", "Transcender", "Alumni"]
     )
     kind_filter = st.multiselect(
         "Kind",
@@ -99,28 +96,33 @@ with st.sidebar:
     )
     in_campus_only = st.checkbox("🟢 Solo en campus ahora", value=False)
     min_level      = st.slider("Nivel mínimo", 0.0, 21.0, 0.0, 0.5)
-    max_pages      = st.number_input("Páginas máx (100/pág)", 1, 100, 20)
+    max_pages      = st.number_input("Páginas máx (100/pág)", 1, 200, 50)
     search_q       = st.text_input("🔍 Buscar login / nombre")
     debug          = st.checkbox("🐛 Debug", value=False)
     load_btn       = st.button("🚀 Cargar estudiantes", type="primary", use_container_width=True)
 
 # ── Grade detection ───────────────────────────────────────────────────────────
 def detect_grade(cu: dict, now_utc: datetime) -> str:
-    raw = (cu.get("grade") or "").strip()
-    bh  = cu.get("blackholed_at")
+    """
+    Usa active? del user para detectar blackholed de forma fiable.
+    - active? = False + blackholed_at → Blackholed
+    - grade de la API → usarlo directamente (Cadet, Transcender, Alumni)
+    - grade null + sin end_at + sin bh → Outercore
+    """
+    user   = cu.get("user", {})
+    active = user.get("active?", True)
+    bh     = cu.get("blackholed_at")
+    raw    = (cu.get("grade") or "").strip()
 
-    # Si tiene blackholed_at en el pasado → Blackholed, independientemente del grade
-    if bh:
-        try:
-            bh_dt = datetime.fromisoformat(bh.replace("Z", "+00:00")).replace(tzinfo=None)
-            if bh_dt < now_utc:
-                return "Blackholed"
-        except Exception:
-            pass
+    # Blackholed real: inactivo + tiene fecha de blackhole
+    if not active and bh:
+        return "Blackholed"
 
+    # Grade explícito de la API
     if raw:
-        return raw  # Cadet, Transcender, Alumni
+        return raw  # Cadet, Transcender, Alumni...
 
+    # Sin grade, activo, sin end_at → Outercore
     end = cu.get("end_at")
     if not end and not bh:
         return "Outercore"
@@ -177,6 +179,7 @@ def fetch_students(campus_id, headers, max_pages, debug):
             loc        = user.get("location") or ""
             loc_active = bool(loc and loc != "unavailable")
 
+            # Black hole días restantes (para Cadets activos)
             bh = cu.get("blackholed_at")
             bh_days = None
             if bh:
@@ -185,6 +188,18 @@ def fetch_students(campus_id, headers, max_pages, debug):
                     bh_days = (bh_dt - now_utc).days
                 except Exception:
                     pass
+
+            # Fecha real de blackhole (updated_at cuando active?=False)
+            bh_real = None
+            if grade == "Blackholed":
+                updated_raw = cu.get("updated_at")
+                if updated_raw:
+                    try:
+                        bh_real = datetime.fromisoformat(
+                            updated_raw.replace("Z", "+00:00")
+                        ).replace(tzinfo=None)
+                    except Exception:
+                        pass
 
             results.append({
                 "Login":        user.get("login", ""),
@@ -198,6 +213,7 @@ def fetch_students(campus_id, headers, max_pages, debug):
                 "Wallet":       int(user.get("wallet", 0) or 0),
                 "Pool":         f"{user.get('pool_month','') or ''} {user.get('pool_year','') or ''}".strip(),
                 "Black Hole":   bh_days,
+                "BH Date":      bh_real,
                 "Updated":      cu.get("updated_at", ""),
             })
 
@@ -214,11 +230,11 @@ def fetch_students(campus_id, headers, max_pages, debug):
 
 # ── Load ──────────────────────────────────────────────────────────────────────
 if load_btn:
-    with st.spinner("Cargando…"):
+    with st.spinner("Cargando estudiantes…"):
         rows = fetch_students(campus_id, headers, max_pages, debug)
 
     if not rows:
-        st.warning("⚠️ No se encontraron estudiantes. Revisa el debug para más info.")
+        st.warning("⚠️ No se encontraron estudiantes.")
         st.stop()
 
     df = pd.DataFrame(rows)
@@ -240,7 +256,7 @@ if "students_df" not in st.session_state or st.session_state["students_df"].empt
 df = st.session_state["students_df"].copy()
 ts = st.session_state.get("students_ts", "—")
 
-# ── Apply filters ─────────────────────────────────────────────────────────────
+# ── Filters ───────────────────────────────────────────────────────────────────
 if grade_filter:
     df = df[df["Grade"].isin(grade_filter)]
 if kind_filter:
@@ -287,8 +303,8 @@ for col, (val, lbl) in zip(
 
 # ── Stats por kind ────────────────────────────────────────────────────────────
 st.markdown('<div class="section-title">👤 POR KIND</div>', unsafe_allow_html=True)
-kind_cols = st.columns(max(len(kc), 1))
 colors = {"student": "#00ff88", "admin": "#ff8c00", "external": "#a855f7"}
+kind_cols = st.columns(max(len(kc), 1))
 for col, (k, v) in zip(kind_cols, kc.items()):
     color = colors.get(k, "#00d4ff")
     col.markdown(
@@ -298,12 +314,12 @@ for col, (k, v) in zip(kind_cols, kc.items()):
     )
 
 st.markdown(
-    f"<br><small style='color:var(--muted)'>Última carga: {ts} · {len(df)} registros mostrados</small>",
+    f"<br><small style='color:var(--muted)'>Última carga: {ts} · {len(df)} registros</small>",
     unsafe_allow_html=True
 )
 st.markdown("---")
 
-# ── Table ─────────────────────────────────────────────────────────────────────
+# ── Sort + Table ──────────────────────────────────────────────────────────────
 c1, c2 = st.columns([3, 1])
 sort_col = c1.selectbox("Ordenar por", ["Level", "Login", "Grade", "Kind", "Eval Points", "Wallet", "Updated"])
 sort_asc = c2.checkbox("Ascendente", value=False)
@@ -368,7 +384,13 @@ st.markdown(f"""
 
 # Por grade
 st.markdown("<br><b style='color:#e2e8f0;font-family:JetBrains Mono,monospace;font-size:0.8rem'>POR GRADE</b>", unsafe_allow_html=True)
-for _, row in df.groupby("Grade")["Eval Points"].agg(["sum","mean","count"]).reset_index().sort_values("sum", ascending=False).iterrows():
+for _, row in (
+    df.groupby("Grade")["Eval Points"]
+    .agg(["sum", "mean", "count"])
+    .reset_index()
+    .sort_values("sum", ascending=False)
+    .iterrows()
+):
     st.markdown(
         f'<div class="summary-box"><div class="summary-row">'
         f'<span class="summary-label">{row["Grade"]} &nbsp;·&nbsp; {int(row["count"])} est.</span>'
@@ -379,7 +401,13 @@ for _, row in df.groupby("Grade")["Eval Points"].agg(["sum","mean","count"]).res
 
 # Por kind
 st.markdown("<br><b style='color:#e2e8f0;font-family:JetBrains Mono,monospace;font-size:0.8rem'>POR KIND</b>", unsafe_allow_html=True)
-for _, row in df.groupby("Kind")["Eval Points"].agg(["sum","mean","count"]).reset_index().sort_values("sum", ascending=False).iterrows():
+for _, row in (
+    df.groupby("Kind")["Eval Points"]
+    .agg(["sum", "mean", "count"])
+    .reset_index()
+    .sort_values("sum", ascending=False)
+    .iterrows()
+):
     k     = row["Kind"]
     color = colors.get(k, "#00d4ff")
     st.markdown(
