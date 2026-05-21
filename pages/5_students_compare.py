@@ -76,14 +76,22 @@ if not headers:
     st.error("❌ No se pudo autenticar. Revisa los secrets.")
     st.stop()
 
-# ── Require students_df from directory page ───────────────────────────────────
-if "students_df" not in st.session_state or st.session_state["students_df_filtered"].empty:
+# ── Require students_df_filtered from directory page ─────────────────────────
+# FIX: comprobar students_df_filtered directamente (no students_df)
+if (
+    "students_df_filtered" not in st.session_state
+    or st.session_state["students_df_filtered"].empty
+):
     st.warning("⚠️ Ve primero a **Students Directory**, aplica los filtros que quieras y pulsa **Cargar estudiantes**.")
     st.stop()
 
 # Solo kind=student
 src_df = st.session_state["students_df_filtered"].copy()
 src_df = src_df[src_df["Kind"] == "student"].reset_index(drop=True)
+
+if src_df.empty:
+    st.warning("⚠️ No hay students (kind=student) en los datos cargados. Revisa los filtros en Students Directory.")
+    st.stop()
 
 st.info(f"✅ {len(src_df)} students cargados desde Students Directory")
 
@@ -197,7 +205,6 @@ if calc_btn:
 
     for i, row in src_df.iterrows():
         login   = row["Login"]
-        # We need user_id — fetch from API using login
         status.text(f"⏳ {i+1}/{total} — {login}")
         bar.progress((i + 1) / total)
 
@@ -235,7 +242,7 @@ st.markdown("---")
 col1, col2 = st.columns(2)
 
 with col1:
-    render_summary(df, f"HOY — EVALUATION POINTS")
+    render_summary(df, "HOY — EVALUATION POINTS")
 
 # ── FECHA BASE — construir df equivalente con pts_base ───────────────────────
 df_base = df.dropna(subset=["pts_base"]).copy()
