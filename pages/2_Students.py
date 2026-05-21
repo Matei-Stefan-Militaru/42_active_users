@@ -41,7 +41,7 @@ def get_token():
         csec = st.secrets["api42"]["client_secret"]
         resp = requests.post("https://api.intra.42.fr/oauth/token", data={
             "grant_type":    "client_credentials",
-            "client_id":     cid,
+            "client_id":      cid,
             "client_secret": csec,
         }, timeout=10)
         if resp.status_code == 200:
@@ -239,6 +239,40 @@ if "students_df" not in st.session_state or st.session_state["students_df"].empt
 df = st.session_state["students_df"].copy()
 ts = st.session_state.get("students_ts", "—")
 
+# ── Descarga de Logins Específicos (Sidebar) ──────────────────────────────────
+with st.sidebar:
+    st.markdown("---")
+    st.markdown("### 📥 Descargar Usernames")
+    
+    current_year = datetime.now().year
+    today_date = datetime.now().date()
+    target_date = datetime(current_year, 2, 19).date()
+    
+    # Filtrado por fechas basándonos en la columna 'Updated'
+    df_today = df[df["Updated"].dt.date == today_date]
+    df_feb19 = df[df["Updated"].dt.date == target_date]
+    
+    logins_today = "\n".join(df_today["Login"].dropna().tolist())
+    logins_feb19 = "\n".join(df_feb19["Login"].dropna().tolist())
+    
+    st.download_button(
+        label=f"📅 Activos hoy ({len(df_today)})",
+        data=logins_today,
+        file_name=f"activos_hoy_{today_date}.txt",
+        mime="text/plain",
+        use_container_width=True,
+        disabled=len(df_today) == 0
+    )
+    
+    st.download_button(
+        label=f"📅 Activos el 19.02 ({len(df_feb19)})",
+        data=logins_feb19,
+        file_name=f"activos_19_02_{current_year}.txt",
+        mime="text/plain",
+        use_container_width=True,
+        disabled=len(df_feb19) == 0
+    )
+
 # ── Filters ───────────────────────────────────────────────────────────────────
 if grade_filter:
     df = df[df["Grade"].isin(grade_filter)]
@@ -260,7 +294,6 @@ if df.empty:
     st.stop()
 
 # ── Guardar vista filtrada para otras páginas ─────────────────────────────────
-# FIX: siempre guardar, independientemente de si hay búsqueda de texto
 st.session_state["students_df_filtered"] = df.copy()
 
 gc = df["Grade"].value_counts()
