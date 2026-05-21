@@ -113,11 +113,12 @@ def fetch_students(campus_id: int, headers: dict, max_pages: int, debug: bool):
 
     while page <= max_pages:
         url = (
-            f"https://api.intra.42.fr/v2/campus/{campus_id}/users"
-            f"?filter[kind]=student"
-            f"&page[size]=100&page[number]={page}"
-            f"&sort=-updated_at"
-        )
+                f"https://api.intra.42.fr/v2/campus/{campus_id}/users"
+                f"?filter[kind]=student"
+                f"&filter[cursus]=on"
+                f"&page[size]=100&page[number]={page}"
+                f"&sort=-updated_at"
+            )
         if debug:
             st.code(url)
 
