@@ -103,30 +103,17 @@ with st.sidebar:
 
 # ── Grade detection ───────────────────────────────────────────────────────────
 def detect_grade(cu: dict, now_utc: datetime) -> str:
-    """
-    Usa active? del user para detectar blackholed de forma fiable.
-    - active? = False + blackholed_at → Blackholed
-    - grade de la API → usarlo directamente (Cadet, Transcender, Alumni)
-    - grade null + sin end_at + sin bh → Outercore
-    """
     user   = cu.get("user", {})
     active = user.get("active?", True)
     bh     = cu.get("blackholed_at")
     raw    = (cu.get("grade") or "").strip()
-
-    # Blackholed real: inactivo + tiene fecha de blackhole
     if not active and bh:
         return "Blackholed"
-
-    # Grade explícito de la API
     if raw:
-        return raw  # Cadet, Transcender, Alumni...
-
-    # Sin grade, activo, sin end_at → Outercore
+        return raw
     end = cu.get("end_at")
     if not end and not bh:
         return "Outercore"
-
     return "Sin grade"
 
 # ── Fetch ─────────────────────────────────────────────────────────────────────
@@ -146,7 +133,6 @@ def fetch_students(campus_id, headers, max_pages, debug):
             f"&page[size]=100&page[number]={page}"
             f"&sort=-updated_at"
         )
-
         if debug:
             st.code(url)
 
@@ -172,14 +158,12 @@ def fetch_students(campus_id, headers, max_pages, debug):
                 continue
 
             grade = detect_grade(cu, now_utc)
-
             if grade not in KEEP_GRADES:
                 continue
 
             loc        = user.get("location") or ""
             loc_active = bool(loc and loc != "unavailable")
 
-            # Black hole días restantes (para Cadets activos)
             bh = cu.get("blackholed_at")
             bh_days = None
             if bh:
@@ -189,7 +173,6 @@ def fetch_students(campus_id, headers, max_pages, debug):
                 except Exception:
                     pass
 
-            # Fecha real de blackhole (updated_at cuando active?=False)
             bh_real = None
             if grade == "Blackholed":
                 updated_raw = cu.get("updated_at")
@@ -275,6 +258,11 @@ if search_q:
 if df.empty:
     st.warning("No hay registros que coincidan con los filtros.")
     st.stop()
+
+# ── Guardar vista filtrada para otras páginas ─────────────────────────────────
+# Solo se actualiza si no hay búsqueda de texto (para no guardar resultados parciales)
+if not search_q:
+    st.session_state["students_df_filtered"] = df.copy()
 
 gc = df["Grade"].value_counts()
 kc = df["Kind"].value_counts()
