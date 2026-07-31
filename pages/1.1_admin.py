@@ -295,12 +295,14 @@ st.markdown('<div class="section-title">📊 ESTADÍSTICAS — SOLO ACTIVOS (stu
 avg_a = activos_validos["Eval Points"].mean() if not activos_validos.empty else 0
 mas_de_5_a = (activos_validos["Eval Points"] > 5).sum()
 avg_a_capped = activos_validos["Eval Points"].clip(upper=5).mean() if not activos_validos.empty else 0
+bajada_a_3 = avg_a_capped - 3
 
-c1, c2, c3, c4 = st.columns(4)
+c1, c2, c3, c4, c5 = st.columns(5)
 c1.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--green)">{len(activos_validos)}</div><div class="stat-lbl">TOTAL ESTUDIANTES</div></div>', unsafe_allow_html=True)
 c2.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--accent)">{avg_a:.1f}</div><div class="stat-lbl">MEDIA EVAL POINTS</div></div>', unsafe_allow_html=True)
 c3.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--purple)">{mas_de_5_a}</div><div class="stat-lbl">CON MÁS DE 5 PUNTOS</div></div>', unsafe_allow_html=True)
 c4.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--orange)">{avg_a_capped:.1f}</div><div class="stat-lbl">MEDIA SI TOPAMOS EN 5</div></div>', unsafe_allow_html=True)
+c5.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--red)">-{bajada_a_3:.1f}</div><div class="stat-lbl">A BAJAR PARA LLEGAR A 3</div></div>', unsafe_allow_html=True)
 
 st.dataframe(tabla_estadisticas(activos_validos), use_container_width=True, hide_index=True)
 
