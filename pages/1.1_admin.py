@@ -5,7 +5,7 @@ import pandas as pd
 from datetime import datetime, timezone
 
 # ── Page config ───────────────────────────────────────────────────────────────
-st.set_page_config(page_title="42 Grade Vacío / Admins", page_icon="🕵️", layout="wide")
+st.set_page_config(page_title="42 Cursus Activo / Pendiente", page_icon="📅", layout="wide")
 
 st.markdown("""
 <style>
@@ -19,11 +19,14 @@ st.markdown("""
 .page-title { font-family:'JetBrains Mono',monospace; font-size:2rem; font-weight:700; color:var(--accent); }
 .page-sub   { font-family:'JetBrains Mono',monospace; font-size:0.8rem; color:var(--muted); margin-bottom:1.5rem; }
 .section-title { font-family:'JetBrains Mono',monospace; font-size:0.9rem; font-weight:700; color:var(--accent); margin:1.25rem 0 0.6rem 0; letter-spacing:1px; }
+.stat-card  { background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:0.9rem; text-align:center; font-family:'JetBrains Mono',monospace; }
+.stat-val   { font-size:1.6rem; font-weight:700; color:var(--accent); }
+.stat-lbl   { font-size:0.6rem; color:var(--muted); margin-top:2px; letter-spacing:0.5px; }
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<div class="page-title">🕵️ Grade vacío / Admins</div>', unsafe_allow_html=True)
-st.markdown('<div class="page-sub">Lista quién exactamente cae en (vacío/null) de grade y quién es admin</div>', unsafe_allow_html=True)
+st.markdown('<div class="page-title">📅 Cursus 42 — Activo vs Pendiente</div>', unsafe_allow_html=True)
+st.markdown('<div class="page-sub">Separa por begin_at: quién ya está activo en el cursus vs quién tiene fecha de inicio futura (aún no cuenta como estudiante)</div>', unsafe_allow_html=True)
 
 # ── Auth (idéntico a tu app) ───────────────────────────────────────────────────
 def get_token():
@@ -69,27 +72,26 @@ if not headers:
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("### 🕵️ Scan settings")
+    st.markdown("### 📅 Scan settings")
 
     campus_id   = st.session_state.get("campus_id", 46)
     campus_name = st.session_state.get("selected_campus", "Barcelona")
     scope = st.radio("Alcance", ["Solo este campus", "Todos los campus"], index=0)
     st.info(f"📍 **{campus_name}** (ID {campus_id})" if scope == "Solo este campus" else "🌍 Todos los campus")
 
-    cursus_id = st.number_input("Cursus ID", value=21, min_value=1)
+    cursus_id = st.number_input("Cursus ID", value=21, min_value=1, help="21 = 42cursus (el principal)")
     max_pages = st.number_input("Páginas máx (100/pág)", 1, 1000, 20)
     debug     = st.checkbox("🐛 Debug (mostrar URLs)", value=False)
 
-    scan_btn = st.button("🚀 Buscar grade vacío / admins", type="primary", use_container_width=True)
+    scan_btn = st.button("🚀 Ver activo / pendiente", type="primary", use_container_width=True)
 
 # ── Scan function with progress bar ────────────────────────────────────────────
 def scan_targets(campus_id, scope, cursus_id, headers, max_pages, debug):
-    empty_grade_rows = []
-    admin_rows       = []
-
+    rows = []
     total = 0
     page  = 1
     base  = f"https://api.intra.42.fr/v2/cursus/{cursus_id}/cursus_users"
+    now_utc = datetime.now(timezone.utc)
 
     bar    = st.progress(0, text="Escaneando…")
     status = st.empty()
@@ -125,25 +127,37 @@ def scan_targets(campus_id, scope, cursus_id, headers, max_pages, debug):
                 continue
             total += 1
 
+            begin_raw = cu.get("begin_at")
+            begin_dt  = None
+            if begin_raw:
+                try:
+                    begin_dt = datetime.fromisoformat(begin_raw.replace("Z", "+00:00"))
+                except Exception:
+                    pass
+
+            if begin_dt is None:
+                status_label = "❓ Sin begin_at"
+                days_to_start = None
+            elif begin_dt > now_utc:
+                status_label = "🟡 Pendiente (aún no empieza)"
+                days_to_start = (begin_dt - now_utc).days
+            else:
+                status_label = "🟢 Activo"
+                days_to_start = None
+
             raw_grade = (cu.get("grade") or "").strip()
-            kind      = user.get("kind", "")
 
-            row = {
-                "Login":        user.get("login", ""),
-                "Display Name": user.get("displayname", ""),
-                "Kind":         kind,
-                "Grade (raw)":  raw_grade if raw_grade else "(vacío/null)",
-                "Level":        round(float(cu.get("level", 0)), 2),
-                "End At":       cu.get("end_at") or "—",
-                "Blackholed At": cu.get("blackholed_at") or "—",
-                "Updated":      cu.get("updated_at", ""),
-            }
-
-            if not raw_grade:
-                empty_grade_rows.append(row)
-
-            if kind == "admin":
-                admin_rows.append(row)
+            rows.append({
+                "Login":          user.get("login", ""),
+                "Display Name":   user.get("displayname", ""),
+                "Kind":           user.get("kind", ""),
+                "Grade (raw)":    raw_grade if raw_grade else "(vacío/null)",
+                "Estado cursus":  status_label,
+                "Begin At":       begin_raw or "—",
+                "Días para empezar": days_to_start,
+                "Level":          round(float(cu.get("level", 0)), 2),
+                "Updated":        cu.get("updated_at", ""),
+            })
 
         status.text(f"📄 Página {page} · {total} registros escaneados")
         bar.progress(min(page / max_pages, 1.0), text=f"Página {page}/{max_pages} · {total} registros")
@@ -155,45 +169,67 @@ def scan_targets(campus_id, scope, cursus_id, headers, max_pages, debug):
     bar.empty()
     status.empty()
 
-    return empty_grade_rows, admin_rows
+    return rows
 
 # ── Run scan ────────────────────────────────────────────────────────────────
 if scan_btn:
-    empty_rows, admin_rows = scan_targets(campus_id, scope, cursus_id, headers, max_pages, debug)
-    st.session_state["empty_grade_rows"] = empty_rows
-    st.session_state["admin_rows"]       = admin_rows
-    st.session_state["scan_ts"]          = datetime.now().strftime("%H:%M:%S")
-    st.success(f"✅ Escaneo completo — {len(empty_rows)} con grade vacío · {len(admin_rows)} admins")
+    rows = scan_targets(campus_id, scope, cursus_id, headers, max_pages, debug)
+    st.session_state["cursus_status_rows"] = rows
+    st.session_state["scan_ts"] = datetime.now().strftime("%H:%M:%S")
+    st.success(f"✅ Escaneo completo — {len(rows)} registros")
 
 # ── Guard ─────────────────────────────────────────────────────────────────────
-if "empty_grade_rows" not in st.session_state:
-    st.info("👆 Pulsa **Buscar grade vacío / admins** en el sidebar para empezar.")
+if "cursus_status_rows" not in st.session_state:
+    st.info("👆 Pulsa **Ver activo / pendiente** en el sidebar para empezar.")
     st.stop()
 
-empty_rows = st.session_state["empty_grade_rows"]
-admin_rows = st.session_state["admin_rows"]
+rows = st.session_state["cursus_status_rows"]
 ts = st.session_state.get("scan_ts", "—")
 
-st.markdown(f"<small style='color:var(--muted)'>Último escaneo: {ts}</small>", unsafe_allow_html=True)
+df = pd.DataFrame(rows)
+st.markdown(f"<small style='color:var(--muted)'>Último escaneo: {ts} · {len(df)} registros</small>", unsafe_allow_html=True)
 
-# ── Grade vacío ─────────────────────────────────────────────────────────────
-st.markdown(f'<div class="section-title">🈳 GRADE VACÍO — {len(empty_rows)}</div>', unsafe_allow_html=True)
-if empty_rows:
-    df_empty = pd.DataFrame(empty_rows)
-    st.dataframe(df_empty, use_container_width=True, hide_index=True)
-    csv_empty = df_empty.to_csv(index=False).encode("utf-8")
-    st.download_button("⬇️ Exportar CSV (grade vacío)", csv_empty, "grade_vacio.csv", "text/csv")
-else:
-    st.info("No hay registros con grade vacío en este escaneo.")
+# ── Stats ─────────────────────────────────────────────────────────────────────
+pendientes = df[df["Estado cursus"] == "🟡 Pendiente (aún no empieza)"]
+activos    = df[df["Estado cursus"] == "🟢 Activo"]
+sin_begin  = df[df["Estado cursus"] == "❓ Sin begin_at"]
+
+c1, c2, c3 = st.columns(3)
+c1.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--green)">{len(activos)}</div><div class="stat-lbl">ACTIVOS</div></div>', unsafe_allow_html=True)
+c2.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--orange)">{len(pendientes)}</div><div class="stat-lbl">PENDIENTES (FUTURO)</div></div>', unsafe_allow_html=True)
+c3.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--muted)">{len(sin_begin)}</div><div class="stat-lbl">SIN begin_at</div></div>', unsafe_allow_html=True)
 
 st.markdown("---")
 
-# ── Admins ────────────────────────────────────────────────────────────────────
-st.markdown(f'<div class="section-title">🛡️ ADMINS — {len(admin_rows)}</div>', unsafe_allow_html=True)
-if admin_rows:
-    df_admin = pd.DataFrame(admin_rows)
-    st.dataframe(df_admin, use_container_width=True, hide_index=True)
-    csv_admin = df_admin.to_csv(index=False).encode("utf-8")
-    st.download_button("⬇️ Exportar CSV (admins)", csv_admin, "admins.csv", "text/csv")
+# ── Pendientes ────────────────────────────────────────────────────────────────
+st.markdown(f'<div class="section-title">🟡 PENDIENTES — empiezan en el futuro ({len(pendientes)})</div>', unsafe_allow_html=True)
+if not pendientes.empty:
+    st.dataframe(
+        pendientes.sort_values("Begin At"),
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Días para empezar": st.column_config.NumberColumn("Días para empezar", format="%d días"),
+        }
+    )
+    csv_pend = pendientes.to_csv(index=False).encode("utf-8")
+    st.download_button("⬇️ Exportar CSV (pendientes)", csv_pend, "pendientes_cursus42.csv", "text/csv")
 else:
-    st.info("No hay admins en este escaneo.")
+    st.info("No hay nadie con fecha de inicio futura en este escaneo.")
+
+st.markdown("---")
+
+# ── Activos ───────────────────────────────────────────────────────────────────
+st.markdown(f'<div class="section-title">🟢 ACTIVOS ({len(activos)})</div>', unsafe_allow_html=True)
+if not activos.empty:
+    st.dataframe(activos.sort_values("Begin At"), use_container_width=True, hide_index=True)
+    csv_act = activos.to_csv(index=False).encode("utf-8")
+    st.download_button("⬇️ Exportar CSV (activos)", csv_act, "activos_cursus42.csv", "text/csv")
+else:
+    st.info("No hay activos en este escaneo.")
+
+# ── Sin begin_at (por si acaso) ─────────────────────────────────────────────────
+if not sin_begin.empty:
+    st.markdown("---")
+    st.markdown(f'<div class="section-title">❓ SIN begin_at ({len(sin_begin)})</div>', unsafe_allow_html=True)
+    st.dataframe(sin_begin, use_container_width=True, hide_index=True)
