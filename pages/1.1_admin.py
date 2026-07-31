@@ -234,10 +234,12 @@ else:
 st.markdown("---")
 
 # ── Activos ───────────────────────────────────────────────────────────────────
-st.markdown(f'<div class="section-title">🟢 ACTIVOS ({len(activos)})</div>', unsafe_allow_html=True)
-if not activos.empty:
-    st.dataframe(activos.sort_values("Begin At"), use_container_width=True, hide_index=True)
-    csv_act = activos.to_csv(index=False).encode("utf-8")
+activos_tabla = activos[(~activos["Blackholeado"]) & (activos["Grade (raw)"] != "(vacío/null)")]
+
+st.markdown(f'<div class="section-title">🟢 ACTIVOS ({len(activos_tabla)})</div>', unsafe_allow_html=True)
+if not activos_tabla.empty:
+    st.dataframe(activos_tabla.sort_values("Begin At"), use_container_width=True, hide_index=True)
+    csv_act = activos_tabla.to_csv(index=False).encode("utf-8")
     st.download_button("⬇️ Exportar CSV (activos)", csv_act, "activos_cursus42.csv", "text/csv")
 else:
     st.info("No hay activos en este escaneo.")
