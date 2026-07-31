@@ -293,10 +293,12 @@ st.markdown("---")
 # ── Tabla A: estadísticas — solo alumnos activos ───────────────────────────────
 st.markdown('<div class="section-title">📊 ESTADÍSTICAS — SOLO ACTIVOS (student · Alumni/Transcender/Cadet sin blackhole)</div>', unsafe_allow_html=True)
 avg_a = activos_validos["Eval Points"].mean() if not activos_validos.empty else 0
+mas_de_5_a = (activos_validos["Eval Points"] > 5).sum()
 
-c1, c2 = st.columns(2)
+c1, c2, c3 = st.columns(3)
 c1.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--green)">{len(activos_validos)}</div><div class="stat-lbl">TOTAL ESTUDIANTES</div></div>', unsafe_allow_html=True)
 c2.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--accent)">{avg_a:.1f}</div><div class="stat-lbl">MEDIA EVAL POINTS</div></div>', unsafe_allow_html=True)
+c3.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--purple)">{mas_de_5_a}</div><div class="stat-lbl">CON MÁS DE 5 PUNTOS</div></div>', unsafe_allow_html=True)
 
 st.dataframe(tabla_estadisticas(activos_validos), use_container_width=True, hide_index=True)
 
