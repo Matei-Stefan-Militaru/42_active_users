@@ -156,6 +156,7 @@ def scan_targets(campus_id, scope, cursus_id, headers, max_pages, debug):
                 "Begin At":       begin_raw or "—",
                 "Días para empezar": days_to_start,
                 "Level":          round(float(cu.get("level", 0)), 2),
+                "Eval Points":    int(user.get("correction_point", 0) or 0),
                 "Updated":        cu.get("updated_at", ""),
             })
 
@@ -233,3 +234,42 @@ if not sin_begin.empty:
     st.markdown("---")
     st.markdown(f'<div class="section-title">❓ SIN begin_at ({len(sin_begin)})</div>', unsafe_allow_html=True)
     st.dataframe(sin_begin, use_container_width=True, hide_index=True)
+
+st.markdown("---")
+
+# ── Tabla 1: solo Activos + media de puntos ────────────────────────────────────
+avg_activos = activos["Eval Points"].mean() if not activos.empty else 0
+
+st.markdown(f'<div class="section-title">💰 MEDIA DE PUNTOS — SOLO ACTIVOS</div>', unsafe_allow_html=True)
+c1, c2 = st.columns(2)
+c1.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--green)">{len(activos)}</div><div class="stat-lbl">ESTUDIANTES ACTIVOS</div></div>', unsafe_allow_html=True)
+c2.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--accent)">{avg_activos:.1f}</div><div class="stat-lbl">MEDIA EVAL POINTS</div></div>', unsafe_allow_html=True)
+
+if not activos.empty:
+    tabla_activos = activos[["Login", "Display Name", "Grade (raw)", "Level", "Eval Points"]].sort_values("Eval Points", ascending=False)
+    st.dataframe(tabla_activos, use_container_width=True, hide_index=True)
+    csv_t1 = tabla_activos.to_csv(index=False).encode("utf-8")
+    st.download_button("⬇️ Exportar CSV (activos + puntos)", csv_t1, "activos_puntos.csv", "text/csv")
+else:
+    st.info("No hay activos en este escaneo.")
+
+st.markdown("---")
+
+# ── Tabla 2: Activos + Pendientes + nueva media combinada ─────────────────────
+activos_y_pendientes = pd.concat([activos, pendientes], ignore_index=True)
+avg_combinada = activos_y_pendientes["Eval Points"].mean() if not activos_y_pendientes.empty else 0
+diferencia = avg_combinada - avg_activos
+
+st.markdown(f'<div class="section-title">💰 MEDIA DE PUNTOS — ACTIVOS + PENDIENTES</div>', unsafe_allow_html=True)
+c1, c2, c3 = st.columns(3)
+c1.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--orange)">{len(activos_y_pendientes)}</div><div class="stat-lbl">ACTIVOS + PENDIENTES</div></div>', unsafe_allow_html=True)
+c2.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--accent)">{avg_combinada:.1f}</div><div class="stat-lbl">NUEVA MEDIA EVAL POINTS</div></div>', unsafe_allow_html=True)
+c3.markdown(f'<div class="stat-card"><div class="stat-val" style="color:{"var(--red)" if diferencia < 0 else "var(--green)"}">{diferencia:+.1f}</div><div class="stat-lbl">DIFERENCIA vs SOLO ACTIVOS</div></div>', unsafe_allow_html=True)
+
+if not activos_y_pendientes.empty:
+    tabla_combinada = activos_y_pendientes[["Login", "Display Name", "Grade (raw)", "Estado cursus", "Level", "Eval Points"]].sort_values("Eval Points", ascending=False)
+    st.dataframe(tabla_combinada, use_container_width=True, hide_index=True)
+    csv_t2 = tabla_combinada.to_csv(index=False).encode("utf-8")
+    st.download_button("⬇️ Exportar CSV (activos+pendientes + puntos)", csv_t2, "activos_pendientes_puntos.csv", "text/csv")
+else:
+    st.info("No hay registros en este escaneo.")
