@@ -146,6 +146,7 @@ def scan_targets(campus_id, scope, cursus_id, headers, max_pages, debug):
                 days_to_start = None
 
             raw_grade = (cu.get("grade") or "").strip()
+            bh_raw    = cu.get("blackholed_at")
 
             rows.append({
                 "Login":          user.get("login", ""),
@@ -157,6 +158,8 @@ def scan_targets(campus_id, scope, cursus_id, headers, max_pages, debug):
                 "Días para empezar": days_to_start,
                 "Level":          round(float(cu.get("level", 0)), 2),
                 "Eval Points":    int(user.get("correction_point", 0) or 0),
+                "Blackholed At":  bh_raw or "—",
+                "Blackholeado":   bool(bh_raw),
                 "Updated":        cu.get("updated_at", ""),
             })
 
@@ -191,14 +194,22 @@ df = pd.DataFrame(rows)
 st.markdown(f"<small style='color:var(--muted)'>Último escaneo: {ts} · {len(df)} registros</small>", unsafe_allow_html=True)
 
 # ── Stats ─────────────────────────────────────────────────────────────────────
-pendientes = df[df["Estado cursus"] == "🟡 Pendiente (aún no empieza)"]
-activos    = df[df["Estado cursus"] == "🟢 Activo"]
-sin_begin  = df[df["Estado cursus"] == "❓ Sin begin_at"]
+pendientes  = df[df["Estado cursus"] == "🟡 Pendiente (aún no empieza)"]
+activos     = df[df["Estado cursus"] == "🟢 Activo"]
+sin_begin   = df[df["Estado cursus"] == "❓ Sin begin_at"]
+blackholeados = df[df["Blackholeado"] == True]
+admins      = df[df["Kind"] == "admin"]
 
-c1, c2, c3 = st.columns(3)
+# Solo "estudiantes de verdad": kind=student, grade Cadet/Transcender/Alumni, y NO blackholeados
+GRADES_STUDENT = {"Cadet", "Transcender", "Alumni"}
+activos_estudiantes    = activos[(activos["Kind"] == "student") & (activos["Grade (raw)"].isin(GRADES_STUDENT)) & (~activos["Blackholeado"])]
+pendientes_estudiantes = pendientes[(pendientes["Kind"] == "student") & (pendientes["Grade (raw)"].isin(GRADES_STUDENT)) & (~pendientes["Blackholeado"])]
+
+c1, c2, c3, c4 = st.columns(4)
 c1.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--green)">{len(activos)}</div><div class="stat-lbl">ACTIVOS</div></div>', unsafe_allow_html=True)
 c2.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--orange)">{len(pendientes)}</div><div class="stat-lbl">PENDIENTES (FUTURO)</div></div>', unsafe_allow_html=True)
 c3.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--muted)">{len(sin_begin)}</div><div class="stat-lbl">SIN begin_at</div></div>', unsafe_allow_html=True)
+c4.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--red)">{len(blackholeados)}</div><div class="stat-lbl">BLACKHOLEADOS</div></div>', unsafe_allow_html=True)
 
 st.markdown("---")
 
@@ -237,16 +248,28 @@ if not sin_begin.empty:
 
 st.markdown("---")
 
-# ── Tabla 1: solo Activos + media de puntos ────────────────────────────────────
-avg_activos = activos["Eval Points"].mean() if not activos.empty else 0
+# ── Blackholeados ───────────────────────────────────────────────────────────────
+st.markdown(f'<div class="section-title">🕳️ BLACKHOLEADOS ({len(blackholeados)})</div>', unsafe_allow_html=True)
+if not blackholeados.empty:
+    tabla_bh = blackholeados[["Login", "Display Name", "Kind", "Grade (raw)", "Level", "Eval Points", "Blackholed At"]].sort_values("Blackholed At", ascending=False)
+    st.dataframe(tabla_bh, use_container_width=True, hide_index=True)
+    csv_bh = tabla_bh.to_csv(index=False).encode("utf-8")
+    st.download_button("⬇️ Exportar CSV (blackholeados)", csv_bh, "blackholeados.csv", "text/csv")
+else:
+    st.info("No hay blackholeados en este escaneo.")
 
-st.markdown(f'<div class="section-title">💰 MEDIA DE PUNTOS — SOLO ACTIVOS</div>', unsafe_allow_html=True)
+st.markdown("---")
+
+# ── Tabla 1: solo Activos (student, Cadet/Transcender/Alumni, sin blackhole) + media ──
+avg_activos = activos_estudiantes["Eval Points"].mean() if not activos_estudiantes.empty else 0
+
+st.markdown(f'<div class="section-title">💰 MEDIA DE PUNTOS — SOLO ACTIVOS (student · Cadet/Transcender/Alumni · sin blackhole)</div>', unsafe_allow_html=True)
 c1, c2 = st.columns(2)
-c1.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--green)">{len(activos)}</div><div class="stat-lbl">ESTUDIANTES ACTIVOS</div></div>', unsafe_allow_html=True)
+c1.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--green)">{len(activos_estudiantes)}</div><div class="stat-lbl">ESTUDIANTES ACTIVOS</div></div>', unsafe_allow_html=True)
 c2.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--accent)">{avg_activos:.1f}</div><div class="stat-lbl">MEDIA EVAL POINTS</div></div>', unsafe_allow_html=True)
 
-if not activos.empty:
-    tabla_activos = activos[["Login", "Display Name", "Grade (raw)", "Level", "Eval Points"]].sort_values("Eval Points", ascending=False)
+if not activos_estudiantes.empty:
+    tabla_activos = activos_estudiantes[["Login", "Display Name", "Grade (raw)", "Level", "Eval Points"]].sort_values("Eval Points", ascending=False)
     st.dataframe(tabla_activos, use_container_width=True, hide_index=True)
     csv_t1 = tabla_activos.to_csv(index=False).encode("utf-8")
     st.download_button("⬇️ Exportar CSV (activos + puntos)", csv_t1, "activos_puntos.csv", "text/csv")
@@ -255,12 +278,12 @@ else:
 
 st.markdown("---")
 
-# ── Tabla 2: Activos + Pendientes + nueva media combinada ─────────────────────
-activos_y_pendientes = pd.concat([activos, pendientes], ignore_index=True)
+# ── Tabla 2: Activos + Pendientes (student, Cadet/Transcender/Alumni, sin blackhole) ──
+activos_y_pendientes = pd.concat([activos_estudiantes, pendientes_estudiantes], ignore_index=True)
 avg_combinada = activos_y_pendientes["Eval Points"].mean() if not activos_y_pendientes.empty else 0
 diferencia = avg_combinada - avg_activos
 
-st.markdown(f'<div class="section-title">💰 MEDIA DE PUNTOS — ACTIVOS + PENDIENTES</div>', unsafe_allow_html=True)
+st.markdown(f'<div class="section-title">💰 MEDIA DE PUNTOS — ACTIVOS + PENDIENTES (student · Cadet/Transcender/Alumni · sin blackhole)</div>', unsafe_allow_html=True)
 c1, c2, c3 = st.columns(3)
 c1.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--orange)">{len(activos_y_pendientes)}</div><div class="stat-lbl">ACTIVOS + PENDIENTES</div></div>', unsafe_allow_html=True)
 c2.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--accent)">{avg_combinada:.1f}</div><div class="stat-lbl">NUEVA MEDIA EVAL POINTS</div></div>', unsafe_allow_html=True)
@@ -271,5 +294,26 @@ if not activos_y_pendientes.empty:
     st.dataframe(tabla_combinada, use_container_width=True, hide_index=True)
     csv_t2 = tabla_combinada.to_csv(index=False).encode("utf-8")
     st.download_button("⬇️ Exportar CSV (activos+pendientes + puntos)", csv_t2, "activos_pendientes_puntos.csv", "text/csv")
+else:
+    st.info("No hay registros en este escaneo.")
+
+st.markdown("---")
+
+# ── Tabla 3 (aparte): Admins + Activos + Pendientes (aún no entrados) ─────────
+st.markdown(f'<div class="section-title">🛡️ TABLA APARTE — ADMINS + ACTIVOS + AÚN NO ENTRADOS</div>', unsafe_allow_html=True)
+
+tabla3 = pd.concat([admins, activos, pendientes], ignore_index=True).drop_duplicates(subset=["Login"])
+
+c1, c2, c3, c4 = st.columns(4)
+c1.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--purple)">{len(admins)}</div><div class="stat-lbl">ADMINS</div></div>', unsafe_allow_html=True)
+c2.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--green)">{len(activos)}</div><div class="stat-lbl">ACTIVOS</div></div>', unsafe_allow_html=True)
+c3.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--orange)">{len(pendientes)}</div><div class="stat-lbl">AÚN NO ENTRADOS</div></div>', unsafe_allow_html=True)
+c4.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--accent)">{len(tabla3)}</div><div class="stat-lbl">TOTAL (sin duplicados)</div></div>', unsafe_allow_html=True)
+
+if not tabla3.empty:
+    tabla3_display = tabla3[["Login", "Display Name", "Kind", "Grade (raw)", "Estado cursus", "Level", "Eval Points"]].sort_values(["Kind", "Estado cursus"])
+    st.dataframe(tabla3_display, use_container_width=True, hide_index=True)
+    csv_t3 = tabla3_display.to_csv(index=False).encode("utf-8")
+    st.download_button("⬇️ Exportar CSV (admins+activos+pendientes)", csv_t3, "admins_activos_pendientes.csv", "text/csv")
 else:
     st.info("No hay registros en este escaneo.")
