@@ -302,6 +302,19 @@ st.dataframe(tabla_estadisticas(activos_validos), use_container_width=True, hide
 
 st.markdown("---")
 
+# ── Tabla A2: estadísticas — solo activos, Transcender/Cadet (sin Alumni) ─────
+activos_sin_alumni = activos_validos[activos_validos["Grade (raw)"] != "Alumni"]
+avg_a2 = activos_sin_alumni["Eval Points"].mean() if not activos_sin_alumni.empty else 0
+
+st.markdown('<div class="section-title">📊 ESTADÍSTICAS — SOLO ACTIVOS (student · Transcender/Cadet sin blackhole)</div>', unsafe_allow_html=True)
+c1, c2 = st.columns(2)
+c1.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--green)">{len(activos_sin_alumni)}</div><div class="stat-lbl">TOTAL ESTUDIANTES</div></div>', unsafe_allow_html=True)
+c2.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--accent)">{avg_a2:.1f}</div><div class="stat-lbl">MEDIA EVAL POINTS</div></div>', unsafe_allow_html=True)
+
+st.dataframe(tabla_estadisticas(activos_sin_alumni), use_container_width=True, hide_index=True)
+
+st.markdown("---")
+
 # ── Tabla B: estadísticas — activos + futuros (pendientes) ────────────────────
 activos_y_futuros = pd.concat([activos_validos, pendientes_validos], ignore_index=True)
 avg_b = activos_y_futuros["Eval Points"].mean() if not activos_y_futuros.empty else 0
