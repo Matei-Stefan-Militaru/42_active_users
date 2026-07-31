@@ -298,12 +298,16 @@ avg_a_capped = activos_validos["Eval Points"].clip(upper=5).mean() if not activo
 total_capped = activos_validos["Eval Points"].clip(upper=5).sum() if not activos_validos.empty else 0
 puntos_a_bajar_3 = total_capped - (3 * len(activos_validos))
 
-c1, c2, c3, c4, c5 = st.columns(5)
+total_sin_topar = activos_validos["Eval Points"].sum() if not activos_validos.empty else 0
+puntos_a_bajar_3_sin_topar = total_sin_topar - (3 * len(activos_validos))
+
+c1, c2, c3, c4, c5, c6 = st.columns(6)
 c1.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--green)">{len(activos_validos)}</div><div class="stat-lbl">TOTAL ESTUDIANTES</div></div>', unsafe_allow_html=True)
 c2.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--accent)">{avg_a:.1f}</div><div class="stat-lbl">MEDIA EVAL POINTS</div></div>', unsafe_allow_html=True)
-c3.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--purple)">{mas_de_5_a}</div><div class="stat-lbl">CON MÁS DE 5 PUNTOS</div></div>', unsafe_allow_html=True)
-c4.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--orange)">{avg_a_capped:.1f}</div><div class="stat-lbl">MEDIA SI TOPAMOS EN 5</div></div>', unsafe_allow_html=True)
-c5.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--red)">-{puntos_a_bajar_3:.0f}</div><div class="stat-lbl">EVAL POINTS A BAJAR PARA MEDIA=3</div></div>', unsafe_allow_html=True)
+c3.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--red)">-{puntos_a_bajar_3_sin_topar:.0f}</div><div class="stat-lbl">EVAL POINTS A BAJAR PARA MEDIA=3</div></div>', unsafe_allow_html=True)
+c4.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--purple)">{mas_de_5_a}</div><div class="stat-lbl">CON MÁS DE 5 PUNTOS</div></div>', unsafe_allow_html=True)
+c5.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--orange)">{avg_a_capped:.1f}</div><div class="stat-lbl">MEDIA SI TOPAMOS EN 5</div></div>', unsafe_allow_html=True)
+c6.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--red)">-{puntos_a_bajar_3:.0f}</div><div class="stat-lbl">EVAL POINTS A BAJAR (TOPADO) PARA MEDIA=3</div></div>', unsafe_allow_html=True)
 
 st.dataframe(tabla_estadisticas(activos_validos), use_container_width=True, hide_index=True)
 
