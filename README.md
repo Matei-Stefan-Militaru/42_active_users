@@ -1,5 +1,8 @@
 # 42 Network - Finding Your Evaluator
 
+
+THis idea was aborted, we are just trying things.
+
 Dashboard interactivo para encontrar usuarios activos en la red de campus 42.
 
 ## 🚀 Características
