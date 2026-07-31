@@ -147,6 +147,10 @@ def scan_targets(campus_id, scope, cursus_id, headers, max_pages, debug):
 
             raw_grade = (cu.get("grade") or "").strip()
             bh_raw    = cu.get("blackholed_at")
+            end_raw   = cu.get("end_at")
+            # Blackholeado "de verdad" = end_at Y blackholed_at ambos presentes.
+            # (blackholed_at solo, sin end_at, es alguien en cuenta atrás / aún no confirmado)
+            es_blackholeado = bool(end_raw) and bool(bh_raw)
 
             rows.append({
                 "Login":          user.get("login", ""),
@@ -159,7 +163,7 @@ def scan_targets(campus_id, scope, cursus_id, headers, max_pages, debug):
                 "Level":          round(float(cu.get("level", 0)), 2),
                 "Eval Points":    int(user.get("correction_point", 0) or 0),
                 "Blackholed At":  bh_raw or "—",
-                "Blackholeado":   bool(bh_raw),
+                "Blackholeado":   es_blackholeado,
                 "Updated":        cu.get("updated_at", ""),
             })
 
