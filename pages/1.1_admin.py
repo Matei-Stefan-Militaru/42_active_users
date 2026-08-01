@@ -303,7 +303,7 @@ puntos_a_bajar_3_sin_topar = total_sin_topar - (3 * len(activos_validos))
 
 c1, c2, c3, c4, c5, c6 = st.columns(6)
 c1.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--green)">{len(activos_validos)}</div><div class="stat-lbl">TOTAL ESTUDIANTES</div></div>', unsafe_allow_html=True)
-c2.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--accent)">{avg_a:.1f}</div><div class="stat-lbl">MEDIA EVAL POINTS</div></div>', unsafe_allow_html=True)
+c2.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--accent)">{avg_a:.3f}</div><div class="stat-lbl">MEDIA EVAL POINTS</div></div>', unsafe_allow_html=True)
 c3.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--red)">-{puntos_a_bajar_3_sin_topar:.0f}</div><div class="stat-lbl">EVAL POINTS A BAJAR PARA MEDIA=3</div></div>', unsafe_allow_html=True)
 c4.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--purple)">{mas_de_5_a}</div><div class="stat-lbl">CON MÁS DE 5 PUNTOS</div></div>', unsafe_allow_html=True)
 c5.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--orange)">{avg_a_capped:.1f}</div><div class="stat-lbl">MEDIA SI TOPAMOS EN 5</div></div>', unsafe_allow_html=True)
@@ -320,7 +320,7 @@ avg_a2 = activos_sin_alumni["Eval Points"].mean() if not activos_sin_alumni.empt
 st.markdown('<div class="section-title">📊 ESTADÍSTICAS — SOLO ACTIVOS (student · Transcender/Cadet sin blackhole)</div>', unsafe_allow_html=True)
 c1, c2 = st.columns(2)
 c1.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--green)">{len(activos_sin_alumni)}</div><div class="stat-lbl">TOTAL ESTUDIANTES</div></div>', unsafe_allow_html=True)
-c2.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--accent)">{avg_a2:.1f}</div><div class="stat-lbl">MEDIA EVAL POINTS</div></div>', unsafe_allow_html=True)
+c2.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--accent)">{avg_a2:.3f}</div><div class="stat-lbl">MEDIA EVAL POINTS</div></div>', unsafe_allow_html=True)
 
 st.dataframe(tabla_estadisticas(activos_sin_alumni), use_container_width=True, hide_index=True)
 
@@ -334,7 +334,7 @@ diff_b = avg_b - avg_a
 st.markdown('<div class="section-title">📊 ESTADÍSTICAS — ACTIVOS + FUTUROS</div>', unsafe_allow_html=True)
 c1, c2, c3 = st.columns(3)
 c1.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--orange)">{len(activos_y_futuros)}</div><div class="stat-lbl">TOTAL ESTUDIANTES</div></div>', unsafe_allow_html=True)
-c2.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--accent)">{avg_b:.1f}</div><div class="stat-lbl">MEDIA EVAL POINTS</div></div>', unsafe_allow_html=True)
+c2.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--accent)">{avg_b:.3f}</div><div class="stat-lbl">MEDIA EVAL POINTS</div></div>', unsafe_allow_html=True)
 c3.markdown(f'<div class="stat-card"><div class="stat-val" style="color:{"var(--red)" if diff_b < 0 else "var(--green)"}">{diff_b:+.1f}</div><div class="stat-lbl">DIFERENCIA vs SOLO ACTIVOS</div></div>', unsafe_allow_html=True)
 
 st.dataframe(tabla_estadisticas(activos_y_futuros), use_container_width=True, hide_index=True)
@@ -352,7 +352,7 @@ diff_c = avg_c - avg_a
 st.markdown('<div class="section-title">📊 ESTADÍSTICAS — ACTIVOS + FUTUROS + ADMINS</div>', unsafe_allow_html=True)
 c1, c2, c3 = st.columns(3)
 c1.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--purple)">{len(activos_futuros_admins)}</div><div class="stat-lbl">TOTAL PERSONAS</div></div>', unsafe_allow_html=True)
-c2.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--accent)">{avg_c:.1f}</div><div class="stat-lbl">MEDIA EVAL POINTS</div></div>', unsafe_allow_html=True)
+c2.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--accent)">{avg_c:.3f}</div><div class="stat-lbl">MEDIA EVAL POINTS</div></div>', unsafe_allow_html=True)
 c3.markdown(f'<div class="stat-card"><div class="stat-val" style="color:{"var(--red)" if diff_c < 0 else "var(--green)"}">{diff_c:+.1f}</div><div class="stat-lbl">DIFERENCIA vs SOLO ACTIVOS</div></div>', unsafe_allow_html=True)
 
 st.dataframe(tabla_estadisticas(activos_futuros_admins), use_container_width=True, hide_index=True)
