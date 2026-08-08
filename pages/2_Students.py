@@ -1,11 +1,11 @@
 import streamlit as st
 import requests
-import pandas as pd
 import time
+import json
 from datetime import datetime, timezone
 
 # ── Page config ───────────────────────────────────────────────────────────────
-st.set_page_config(page_title="42 Students Directory", page_icon="🎓", layout="wide")
+st.set_page_config(page_title="42 Buscar Usuario (Raw)", page_icon="🔎", layout="wide")
 
 st.markdown("""
 <style>
@@ -19,22 +19,13 @@ st.markdown("""
 .page-title { font-family:'JetBrains Mono',monospace; font-size:2rem; font-weight:700; color:var(--accent); }
 .page-sub   { font-family:'JetBrains Mono',monospace; font-size:0.8rem; color:var(--muted); margin-bottom:1.5rem; }
 .section-title { font-family:'JetBrains Mono',monospace; font-size:0.9rem; font-weight:700; color:var(--accent); margin:1.25rem 0 0.6rem 0; letter-spacing:1px; }
-.stat-card  { background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:0.9rem; text-align:center; font-family:'JetBrains Mono',monospace; }
-.stat-val   { font-size:1.6rem; font-weight:700; color:var(--accent); }
-.stat-lbl   { font-size:0.6rem; color:var(--muted); margin-top:2px; letter-spacing:0.5px; }
-.summary-box  { background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:1rem 1.5rem; margin-top:0.4rem; font-family:'JetBrains Mono',monospace; }
-.summary-row  { display:flex; justify-content:space-between; align-items:center; padding:0.3rem 0; border-bottom:1px solid var(--border); }
-.summary-row:last-child { border-bottom:none; }
-.summary-label { color:var(--muted); font-size:0.75rem; }
-.summary-value { font-weight:700; font-size:0.9rem; color:#e2e8f0; }
-.summary-total { color:var(--green); font-size:1.1rem; }
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<div class="page-title">🎓 42 Students Directory</div>', unsafe_allow_html=True)
-st.markdown('<div class="page-sub">Cadets · Outercore · Transcender · Alumni · Blackholed — cursus 21</div>', unsafe_allow_html=True)
+st.markdown('<div class="page-title">🔎 Buscar Usuario — Info Raw</div>', unsafe_allow_html=True)
+st.markdown('<div class="page-sub">Escanea todos los cursus_users y luego busca uno por login para ver su JSON completo tal cual lo da la API</div>', unsafe_allow_html=True)
 
-# ── Auth ──────────────────────────────────────────────────────────────────────
+# ── Auth (idéntico a tu app) ───────────────────────────────────────────────────
 def get_token():
     try:
         cid  = st.secrets["api42"]["client_id"]
@@ -78,61 +69,35 @@ if not headers:
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("### 🎓 Students Filter")
+    st.markdown("### 🔎 Scan settings")
 
     campus_id   = st.session_state.get("campus_id", 46)
     campus_name = st.session_state.get("selected_campus", "Barcelona")
-    st.info(f"📍 **{campus_name}** (ID {campus_id})")
+    scope = st.radio("Alcance", ["Solo este campus", "Todos los campus"], index=0)
+    st.info(f"📍 **{campus_name}** (ID {campus_id})" if scope == "Solo este campus" else "🌍 Todos los campus")
 
-    grade_filter = st.multiselect(
-        "Grade",
-        ["Cadet", "Outercore", "Transcender", "Alumni", "Blackholed"],
-        default=["Cadet", "Outercore", "Transcender", "Alumni"]
-    )
-    kind_filter = st.multiselect(
-        "Kind",
-        ["student", "admin", "external"],
-        default=["student", "admin", "external"]
-    )
-    in_campus_only = st.checkbox("🟢 Solo en campus ahora", value=False)
-    min_level      = st.slider("Nivel mínimo", 0.0, 21.0, 0.0, 0.5)
-    max_pages      = st.number_input("Páginas máx (100/pág)", 1, 200, 50)
-    search_q       = st.text_input("🔍 Buscar login / nombre")
-    debug          = st.checkbox("🐛 Debug", value=False)
-    load_btn       = st.button("🚀 Cargar estudiantes", type="primary", use_container_width=True)
+    cursus_id = st.number_input("Cursus ID", value=21, min_value=1)
+    max_pages = st.number_input("Páginas máx (100/pág)", 1, 1000, 20)
+    debug     = st.checkbox("🐛 Debug (mostrar URLs)", value=False)
 
-# ── Grade detection ───────────────────────────────────────────────────────────
-def detect_grade(cu: dict, now_utc: datetime) -> str:
-    user   = cu.get("user", {})
-    active = user.get("active?", True)
-    bh     = cu.get("blackholed_at")
-    raw    = (cu.get("grade") or "").strip()
-    if not active and bh:
-        return "Blackholed"
-    if raw:
-        return raw
-    end = cu.get("end_at")
-    if not end and not bh:
-        return "Outercore"
-    return "Sin grade"
+    scan_btn = st.button("🚀 Escanear usuarios", type="primary", use_container_width=True)
 
-# ── Fetch ─────────────────────────────────────────────────────────────────────
-KEEP_GRADES = {"Cadet", "Outercore", "Transcender", "Alumni", "Blackholed"}
+# ── Scan function with progress bar (idéntica al resto de tus scripts) ────────
+def scan_all_raw(campus_id, scope, cursus_id, headers, max_pages, debug):
+    raw_by_login = {}
+    total = 0
+    page  = 1
+    base  = f"https://api.intra.42.fr/v2/cursus/{cursus_id}/cursus_users"
 
-def fetch_students(campus_id, headers, max_pages, debug):
-    results = []
-    bar     = st.progress(0, text="Cargando…")
-    status  = st.empty()
-    page    = 1
-    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+    bar    = st.progress(0, text="Escaneando…")
+    status = st.empty()
 
     while page <= max_pages:
-        url = (
-            f"https://api.intra.42.fr/v2/cursus/21/cursus_users"
-            f"?filter[campus_id]={campus_id}"
-            f"&page[size]=100&page[number]={page}"
-            f"&sort=-updated_at"
-        )
+        if scope == "Solo este campus":
+            url = f"{base}?filter[campus_id]={campus_id}&page[size]=100&page[number]={page}&sort=-updated_at"
+        else:
+            url = f"{base}?page[size]=100&page[number]={page}&sort=-updated_at"
+
         if debug:
             st.code(url)
 
@@ -153,55 +118,15 @@ def fetch_students(campus_id, headers, max_pages, debug):
             break
 
         for cu in data:
-            user = cu.get("user", {})
-            if not user:
+            user = cu.get("user") or {}
+            login = user.get("login")
+            if not login:
                 continue
+            total += 1
+            raw_by_login[login.lower()] = cu
 
-            grade = detect_grade(cu, now_utc)
-            if grade not in KEEP_GRADES:
-                continue
-
-            loc        = user.get("location") or ""
-            loc_active = bool(loc and loc != "unavailable")
-
-            bh = cu.get("blackholed_at")
-            bh_days = None
-            if bh:
-                try:
-                    bh_dt   = datetime.fromisoformat(bh.replace("Z", "+00:00")).replace(tzinfo=None)
-                    bh_days = (bh_dt - now_utc).days
-                except Exception:
-                    pass
-
-            bh_real = None
-            if grade == "Blackholed":
-                updated_raw = cu.get("updated_at")
-                if updated_raw:
-                    try:
-                        bh_real = datetime.fromisoformat(
-                            updated_raw.replace("Z", "+00:00")
-                        ).replace(tzinfo=None)
-                    except Exception:
-                        pass
-
-            results.append({
-                "Login":        user.get("login", ""),
-                "Display Name": user.get("displayname", ""),
-                "Kind":         user.get("kind", ""),
-                "Grade":        grade,
-                "Level":        round(float(cu.get("level", 0)), 2),
-                "In Campus":    "🟢" if loc_active else "⚪",
-                "Location":     loc if loc_active else "—",
-                "Eval Points":  int(user.get("correction_point", 0) or 0),
-                "Wallet":       int(user.get("wallet", 0) or 0),
-                "Pool":         f"{user.get('pool_month','') or ''} {user.get('pool_year','') or ''}".strip(),
-                "Black Hole":   bh_days,
-                "BH Date":      bh_real,
-                "Updated":      cu.get("updated_at", ""),
-            })
-
-        status.text(f"📄 Página {page} · {len(results)} registros")
-        bar.progress(min(page / max_pages, 1.0))
+        status.text(f"📄 Página {page} · {total} registros escaneados")
+        bar.progress(min(page / max_pages, 1.0), text=f"Página {page}/{max_pages} · {total} registros")
 
         if len(data) < 100:
             break
@@ -209,203 +134,48 @@ def fetch_students(campus_id, headers, max_pages, debug):
 
     bar.empty()
     status.empty()
-    return results
 
-# ── Load ──────────────────────────────────────────────────────────────────────
-if load_btn:
-    with st.spinner("Cargando estudiantes…"):
-        rows = fetch_students(campus_id, headers, max_pages, debug)
+    return raw_by_login
 
-    if not rows:
-        st.warning("⚠️ No se encontraron estudiantes.")
-        st.stop()
-
-    df = pd.DataFrame(rows)
-    df["Updated"] = pd.to_datetime(df["Updated"], utc=True, errors="coerce").dt.tz_localize(None)
-    st.session_state["students_df"] = df
-    st.session_state["students_ts"] = datetime.now().strftime("%H:%M:%S")
-
-    if debug:
-        st.write("**Grades:**", df["Grade"].value_counts().to_dict())
-        st.write("**Kinds:**",  df["Kind"].value_counts().to_dict())
-
-    st.success(f"✅ {len(df)} registros cargados")
+# ── Run scan ────────────────────────────────────────────────────────────────
+if scan_btn:
+    raw_by_login = scan_all_raw(campus_id, scope, cursus_id, headers, max_pages, debug)
+    st.session_state["raw_by_login"] = raw_by_login
+    st.session_state["scan_ts"] = datetime.now().strftime("%H:%M:%S")
+    st.success(f"✅ Escaneo completo — {len(raw_by_login)} usuarios indexados")
 
 # ── Guard ─────────────────────────────────────────────────────────────────────
-if "students_df" not in st.session_state or st.session_state["students_df"].empty:
-    st.info("👆 Pulsa **Cargar estudiantes** en el sidebar para empezar.")
+if "raw_by_login" not in st.session_state:
+    st.info("👆 Pulsa **Escanear usuarios** en el sidebar para empezar.")
     st.stop()
 
-df = st.session_state["students_df"].copy()
-ts = st.session_state.get("students_ts", "—")
+raw_by_login = st.session_state["raw_by_login"]
+ts = st.session_state.get("scan_ts", "—")
 
-# ── Filters ───────────────────────────────────────────────────────────────────
-if grade_filter:
-    df = df[df["Grade"].isin(grade_filter)]
-if kind_filter:
-    df = df[df["Kind"].isin(kind_filter)]
-if in_campus_only:
-    df = df[df["In Campus"] == "🟢"]
-if min_level > 0:
-    df = df[df["Level"] >= min_level]
-if search_q:
-    q = search_q.lower()
-    df = df[
-        df["Login"].str.lower().str.contains(q, na=False) |
-        df["Display Name"].str.lower().str.contains(q, na=False)
-    ]
-
-if df.empty:
-    st.warning("No hay registros que coincidan con los filtros.")
-    st.stop()
-
-# ── Guardar vista filtrada para otras páginas ─────────────────────────────────
-# FIX: siempre guardar, independientemente de si hay búsqueda de texto
-st.session_state["students_df_filtered"] = df.copy()
-
-gc = df["Grade"].value_counts()
-kc = df["Kind"].value_counts()
-
-# ── Stats por grade ───────────────────────────────────────────────────────────
-st.markdown('<div class="section-title">📊 POR GRADE</div>', unsafe_allow_html=True)
-c1, c2, c3, c4, c5, c6, c7, c8 = st.columns(8)
-for col, (val, lbl) in zip(
-    [c1, c2, c3, c4, c5, c6, c7, c8],
-    [
-        (len(df),                      "TOTAL"),
-        ((df["In Campus"]=="🟢").sum(),"EN CAMPUS"),
-        (f"{df['Level'].mean():.1f}",  "NIVEL ⌀"),
-        (gc.get("Cadet", 0),           "CADETS"),
-        (gc.get("Outercore", 0),       "OUTERCORE"),
-        (gc.get("Transcender", 0),     "TRANSCENDER"),
-        (gc.get("Alumni", 0),          "ALUMNI"),
-        (gc.get("Blackholed", 0),      "BLACKHOLED"),
-    ]
-):
-    col.markdown(
-        f'<div class="stat-card"><div class="stat-val">{val}</div>'
-        f'<div class="stat-lbl">{lbl}</div></div>',
-        unsafe_allow_html=True
-    )
-
-# ── Stats por kind ────────────────────────────────────────────────────────────
-st.markdown('<div class="section-title">👤 POR KIND</div>', unsafe_allow_html=True)
-colors = {"student": "#00ff88", "admin": "#ff8c00", "external": "#a855f7"}
-kind_cols = st.columns(max(len(kc), 1))
-for col, (k, v) in zip(kind_cols, kc.items()):
-    color = colors.get(k, "#00d4ff")
-    col.markdown(
-        f'<div class="stat-card"><div class="stat-val" style="color:{color}">{v}</div>'
-        f'<div class="stat-lbl">{k.upper()}</div></div>',
-        unsafe_allow_html=True
-    )
-
-st.markdown(
-    f"<br><small style='color:var(--muted)'>Última carga: {ts} · {len(df)} registros</small>",
-    unsafe_allow_html=True
-)
+st.markdown(f"<small style='color:var(--muted)'>Último escaneo: {ts} · {len(raw_by_login)} usuarios indexados</small>", unsafe_allow_html=True)
 st.markdown("---")
 
-# ── Sort + Table ──────────────────────────────────────────────────────────────
-c1, c2 = st.columns([3, 1])
-sort_col = c1.selectbox("Ordenar por", ["Level", "Login", "Grade", "Kind", "Eval Points", "Wallet", "Updated"])
-sort_asc = c2.checkbox("Ascendente", value=False)
+# ── Búsqueda de usuario — este campo se queda siempre visible ────────────────
+st.markdown('<div class="section-title">🔎 BUSCAR USUARIO</div>', unsafe_allow_html=True)
+login_query = st.text_input("Login del estudiante", placeholder="ej: brivasqu", key="login_search")
 
-df_sorted  = df.sort_values(sort_col, ascending=sort_asc, na_position="last")
-display_df = df_sorted[[
-    "Login", "Display Name", "Kind", "Grade", "Level",
-    "In Campus", "Location", "Eval Points", "Wallet",
-    "Pool", "Black Hole", "Updated"
-]].copy()
+if login_query:
+    match = raw_by_login.get(login_query.strip().lower())
+    if match:
+        user = match.get("user") or {}
+        st.success(f"✅ Encontrado: **{user.get('login', '?')}** — {user.get('displayname', '')}")
 
-display_df["Updated"] = display_df["Updated"].dt.strftime("%Y-%m-%d %H:%M").fillna("—")
-display_df["Black Hole"] = display_df["Black Hole"].apply(
-    lambda x: f"⚠️ {int(x)}d" if pd.notna(x) and x < 30
-    else (f"{int(x)}d" if pd.notna(x) else "—")
-)
+        c1, c2, c3, c4 = st.columns(4)
+        c1.markdown(f'<div class="stat-card" style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:0.9rem;text-align:center;font-family:JetBrains Mono,monospace"><div style="font-size:1.4rem;font-weight:700;color:var(--accent)">{match.get("grade") or "—"}</div><div style="font-size:0.6rem;color:var(--muted)">GRADE</div></div>', unsafe_allow_html=True)
+        c2.markdown(f'<div class="stat-card" style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:0.9rem;text-align:center;font-family:JetBrains Mono,monospace"><div style="font-size:1.4rem;font-weight:700;color:var(--green)">{round(float(match.get("level", 0)), 2)}</div><div style="font-size:0.6rem;color:var(--muted)">LEVEL</div></div>', unsafe_allow_html=True)
+        c3.markdown(f'<div class="stat-card" style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:0.9rem;text-align:center;font-family:JetBrains Mono,monospace"><div style="font-size:1.4rem;font-weight:700;color:var(--purple)">{user.get("correction_point", "—")}</div><div style="font-size:0.6rem;color:var(--muted)">EVAL POINTS</div></div>', unsafe_allow_html=True)
+        c4.markdown(f'<div class="stat-card" style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:0.9rem;text-align:center;font-family:JetBrains Mono,monospace"><div style="font-size:1.4rem;font-weight:700;color:{"var(--red)" if user.get("active?") is False else "var(--green)"}">{user.get("active?")}</div><div style="font-size:0.6rem;color:var(--muted)">ACTIVE?</div></div>', unsafe_allow_html=True)
 
-st.dataframe(
-    display_df,
-    use_container_width=True,
-    hide_index=True,
-    height=600,
-    column_config={
-        "Level":      st.column_config.ProgressColumn("Level", min_value=0, max_value=21, format="%.2f"),
-        "In Campus":  st.column_config.TextColumn("📍", width="small"),
-        "Black Hole": st.column_config.TextColumn("⏳ BH", width="small"),
-        "Grade":      st.column_config.TextColumn("Grade", width="small"),
-        "Kind":       st.column_config.TextColumn("Kind",  width="small"),
-    }
-)
+        st.markdown("---")
+        st.markdown('<div class="section-title">📄 JSON COMPLETO — cursus_user</div>', unsafe_allow_html=True)
+        st.json(match)
 
-# ── Eval Points Summary ───────────────────────────────────────────────────────
-st.markdown("---")
-st.markdown('<div class="section-title">💰 EVALUATION POINTS</div>', unsafe_allow_html=True)
-
-total_eval = int(df["Eval Points"].sum())
-avg_eval   = df["Eval Points"].mean()
-max_eval   = int(df["Eval Points"].max())
-min_eval   = int(df["Eval Points"].min())
-top_user   = df.loc[df["Eval Points"].idxmax(), "Login"]
-
-st.markdown(f"""
-<div class="summary-box">
-  <div class="summary-row">
-    <span class="summary-label">TOTAL PUNTOS</span>
-    <span class="summary-value summary-total">{total_eval:,}</span>
-  </div>
-  <div class="summary-row">
-    <span class="summary-label">MEDIA POR ESTUDIANTE</span>
-    <span class="summary-value">{avg_eval:.1f} pts</span>
-  </div>
-  <div class="summary-row">
-    <span class="summary-label">MÁXIMO</span>
-    <span class="summary-value">{max_eval} pts — {top_user}</span>
-  </div>
-  <div class="summary-row">
-    <span class="summary-label">MÍNIMO</span>
-    <span class="summary-value">{min_eval} pts</span>
-  </div>
-</div>
-""", unsafe_allow_html=True)
-
-# Por grade
-st.markdown("<br><b style='color:#e2e8f0;font-family:JetBrains Mono,monospace;font-size:0.8rem'>POR GRADE</b>", unsafe_allow_html=True)
-for _, row in (
-    df.groupby("Grade")["Eval Points"]
-    .agg(["sum", "mean", "count"])
-    .reset_index()
-    .sort_values("sum", ascending=False)
-    .iterrows()
-):
-    st.markdown(
-        f'<div class="summary-box"><div class="summary-row">'
-        f'<span class="summary-label">{row["Grade"]} &nbsp;·&nbsp; {int(row["count"])} est.</span>'
-        f'<span class="summary-value">Total: {int(row["sum"]):,} pts &nbsp;·&nbsp; Media: {row["mean"]:.1f} pts</span>'
-        f'</div></div>',
-        unsafe_allow_html=True
-    )
-
-# Por kind
-st.markdown("<br><b style='color:#e2e8f0;font-family:JetBrains Mono,monospace;font-size:0.8rem'>POR KIND</b>", unsafe_allow_html=True)
-for _, row in (
-    df.groupby("Kind")["Eval Points"]
-    .agg(["sum", "mean", "count"])
-    .reset_index()
-    .sort_values("sum", ascending=False)
-    .iterrows()
-):
-    k     = row["Kind"]
-    color = colors.get(k, "#00d4ff")
-    st.markdown(
-        f'<div class="summary-box"><div class="summary-row">'
-        f'<span class="summary-label" style="color:{color}">{k} &nbsp;·&nbsp; {int(row["count"])} est.</span>'
-        f'<span class="summary-value">Total: {int(row["sum"]):,} pts &nbsp;·&nbsp; Media: {row["mean"]:.1f} pts</span>'
-        f'</div></div>',
-        unsafe_allow_html=True
-    )
-
-# ── Export ────────────────────────────────────────────────────────────────────
-st.markdown("---")
-csv = display_df.to_csv(index=False).encode("utf-8")
-st.download_button("⬇️ Exportar CSV", csv, "42_students.csv", "text/csv")
+        raw_str = json.dumps(match, indent=2, ensure_ascii=False)
+        st.download_button("⬇️ Descargar JSON", raw_str, f"{login_query.strip().lower()}_raw.json", "application/json")
+    else:
+        st.warning(f"⚠️ No se encontró ningún usuario con login `{login_query}` en el escaneo actual. Revisa que esté escrito bien o que esté dentro del alcance/cursus escaneado.")
