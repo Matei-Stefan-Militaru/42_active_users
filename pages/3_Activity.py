@@ -272,7 +272,9 @@ if solo_estudiantes_validos:
 st.markdown(f"<small style='color:var(--muted)'>Último escaneo: {ts} · fuente: {st.session_state.get('scan_source', '—')} · {len(df)} estudiantes con fecha de actividad válida</small>", unsafe_allow_html=True)
 st.markdown("---")
 
-# ── Categorías de inactividad (umbral: "al menos X tiempo sin actividad") ────
+# ── Categorías de inactividad (mutuamente excluyentes) ────────────────────────
+# Cada estudiante cae SOLO en la categoría más alta que le corresponda:
+# si lleva 5 años sin actividad, cuenta en "5 años" y NO en "4 años", "3 años", etc.
 CATEGORIAS = [
     ("1 mes",   30),
     ("2 meses", 60),
@@ -286,10 +288,23 @@ CATEGORIAS = [
     ("4 años",  365 * 4),
     ("5 años",  365 * 5),
 ]
+# Umbrales ordenados de mayor a menor para asignar la categoría más alta que aplique
+CATEGORIAS_DESC = sorted(CATEGORIAS, key=lambda x: x[1], reverse=True)
+
+def categorizar(dias):
+    if pd.isna(dias):
+        return None
+    for label, umbral in CATEGORIAS_DESC:
+        if dias >= umbral:
+            return label
+    return None  # menos de 1 mes sin actividad → no entra en ninguna categoría
+
+df["Categoría"] = df["Días sin actividad"].apply(categorizar)
+df_categorizado = df[df["Categoría"].notna()]
 
 stats_rows = []
 for label, dias in CATEGORIAS:
-    subset = df[df["Días sin actividad"] >= dias]
+    subset = df_categorizado[df_categorizado["Categoría"] == label]
     stats_rows.append({
         "Categoría":            label,
         "Días (umbral)":        dias,
@@ -301,7 +316,7 @@ for label, dias in CATEGORIAS:
 tabla_categorias = pd.DataFrame(stats_rows)
 
 st.markdown('<div class="section-title">📊 ESTADÍSTICAS POR TIEMPO DE INACTIVIDAD</div>', unsafe_allow_html=True)
-st.caption("Cada fila cuenta a todos los que llevan AL MENOS ese tiempo sin actividad (no son mutuamente excluyentes — alguien con 2 años sin actividad también está en la fila de 1 año, 6 meses, etc.)")
+st.caption("Categorías mutuamente excluyentes: cada estudiante cuenta solo en la categoría más alta que le corresponde (ej. alguien con 5 años sin actividad solo aparece en '5 años', no en las demás).")
 
 st.dataframe(
     tabla_categorias,
@@ -323,7 +338,7 @@ st.markdown('<div class="section-title">🔍 VER ESTUDIANTES DE UNA CATEGORÍA</
 categoria_elegida = st.selectbox("Elige categoría", [c[0] for c in CATEGORIAS])
 dias_elegidos = dict(CATEGORIAS)[categoria_elegida]
 
-subset_detalle = df[df["Días sin actividad"] >= dias_elegidos][
+subset_detalle = df_categorizado[df_categorizado["Categoría"] == categoria_elegida][
     ["Login", "Display Name", "Grade (raw)", "Level", "Eval Points", "Días sin actividad", "Updated At"]
 ].sort_values("Días sin actividad", ascending=False)
 
