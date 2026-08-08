@@ -356,3 +356,18 @@ c2.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--ac
 c3.markdown(f'<div class="stat-card"><div class="stat-val" style="color:{"var(--red)" if diff_c < 0 else "var(--green)"}">{diff_c:+.1f}</div><div class="stat-lbl">DIFERENCIA vs SOLO ACTIVOS</div></div>', unsafe_allow_html=True)
 
 st.dataframe(tabla_estadisticas(activos_futuros_admins), use_container_width=True, hide_index=True)
+
+st.markdown("---")
+
+# ── Tabla D: estadísticas — activos + admins (sin futuros) ─────────────────────
+activos_admins = pd.concat([activos_validos, admins_para_stats], ignore_index=True)
+avg_d = activos_admins["Eval Points"].mean() if not activos_admins.empty else 0
+diff_d = avg_d - avg_a
+
+st.markdown('<div class="section-title">📊 ESTADÍSTICAS — ACTIVOS + ADMINS</div>', unsafe_allow_html=True)
+c1, c2, c3 = st.columns(3)
+c1.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--purple)">{len(activos_admins)}</div><div class="stat-lbl">TOTAL PERSONAS</div></div>', unsafe_allow_html=True)
+c2.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--accent)">{avg_d:.3f}</div><div class="stat-lbl">MEDIA EVAL POINTS</div></div>', unsafe_allow_html=True)
+c3.markdown(f'<div class="stat-card"><div class="stat-val" style="color:{"var(--red)" if diff_d < 0 else "var(--green)"}">{diff_d:+.1f}</div><div class="stat-lbl">DIFERENCIA vs SOLO ACTIVOS</div></div>', unsafe_allow_html=True)
+
+st.dataframe(tabla_estadisticas(activos_admins), use_container_width=True, hide_index=True)
