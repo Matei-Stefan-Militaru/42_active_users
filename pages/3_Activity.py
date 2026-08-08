@@ -187,7 +187,7 @@ def scan_targets(campus_id, scope, cursus_id, headers, max_pages, debug):
             is_active_field = user.get("active?", True)
             es_blackholeado = (is_active_field is False) and bool(bh_raw)
 
-            updated_raw = cu.get("updated_at")
+            updated_raw = user.get("updated_at")
             updated_dt  = None
             dias_inactivo = None
             if updated_raw:
@@ -222,7 +222,7 @@ def scan_targets(campus_id, scope, cursus_id, headers, max_pages, debug):
     return rows
 
 # ── Run scan (con caché) ────────────────────────────────────────────────────
-scan_key = f"{scope}|{cursus_id}|{campus_id}|{max_pages}"
+scan_key = f"v2_user_updated_at|{scope}|{cursus_id}|{campus_id}|{max_pages}"
 
 if forzar_btn:
     rows = scan_targets(campus_id, scope, cursus_id, headers, max_pages, debug)
