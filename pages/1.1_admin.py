@@ -313,16 +313,20 @@ st.dataframe(tabla_estadisticas(activos_validos), use_container_width=True, hide
 
 st.markdown("---")
 
-# ── Tabla A2: estadísticas — solo activos, Transcender/Cadet (sin Alumni) ─────
-activos_sin_alumni = activos_validos[activos_validos["Grade (raw)"] != "Alumni"]
-avg_a2 = activos_sin_alumni["Eval Points"].mean() if not activos_sin_alumni.empty else 0
+# ── Tabla D: estadísticas — activos + admins (sin futuros) ─────────────────────
+admins_para_stats = admins.copy()
+admins_para_stats["Grade (raw)"] = "Admin"
+activos_admins = pd.concat([activos_validos, admins_para_stats], ignore_index=True)
+avg_d = activos_admins["Eval Points"].mean() if not activos_admins.empty else 0
+diff_d = avg_d - avg_a
 
-st.markdown('<div class="section-title">📊 ESTADÍSTICAS — SOLO ACTIVOS (student · Transcender/Cadet sin blackhole)</div>', unsafe_allow_html=True)
-c1, c2 = st.columns(2)
-c1.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--green)">{len(activos_sin_alumni)}</div><div class="stat-lbl">TOTAL ESTUDIANTES</div></div>', unsafe_allow_html=True)
-c2.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--accent)">{avg_a2:.3f}</div><div class="stat-lbl">MEDIA EVAL POINTS</div></div>', unsafe_allow_html=True)
+st.markdown('<div class="section-title">📊 ESTADÍSTICAS — ACTIVOS + ADMINS</div>', unsafe_allow_html=True)
+c1, c2, c3 = st.columns(3)
+c1.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--purple)">{len(activos_admins)}</div><div class="stat-lbl">TOTAL PERSONAS</div></div>', unsafe_allow_html=True)
+c2.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--accent)">{avg_d:.3f}</div><div class="stat-lbl">MEDIA EVAL POINTS</div></div>', unsafe_allow_html=True)
+c3.markdown(f'<div class="stat-card"><div class="stat-val" style="color:{"var(--red)" if diff_d < 0 else "var(--green)"}">{diff_d:+.1f}</div><div class="stat-lbl">DIFERENCIA vs SOLO ACTIVOS</div></div>', unsafe_allow_html=True)
 
-st.dataframe(tabla_estadisticas(activos_sin_alumni), use_container_width=True, hide_index=True)
+st.dataframe(tabla_estadisticas(activos_admins), use_container_width=True, hide_index=True)
 
 st.markdown("---")
 
@@ -343,8 +347,6 @@ st.markdown("---")
 
 # ── Tabla C: estadísticas — activos + futuros + admins ─────────────────────────
 # Los admins no tienen "Grade (raw)" útil, así que se agrupan aparte con su propia etiqueta
-admins_para_stats = admins.copy()
-admins_para_stats["Grade (raw)"] = "Admin"
 activos_futuros_admins = pd.concat([activos_validos, pendientes_validos, admins_para_stats], ignore_index=True)
 avg_c = activos_futuros_admins["Eval Points"].mean() if not activos_futuros_admins.empty else 0
 diff_c = avg_c - avg_a
@@ -356,18 +358,3 @@ c2.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--ac
 c3.markdown(f'<div class="stat-card"><div class="stat-val" style="color:{"var(--red)" if diff_c < 0 else "var(--green)"}">{diff_c:+.1f}</div><div class="stat-lbl">DIFERENCIA vs SOLO ACTIVOS</div></div>', unsafe_allow_html=True)
 
 st.dataframe(tabla_estadisticas(activos_futuros_admins), use_container_width=True, hide_index=True)
-
-st.markdown("---")
-
-# ── Tabla D: estadísticas — activos + admins (sin futuros) ─────────────────────
-activos_admins = pd.concat([activos_validos, admins_para_stats], ignore_index=True)
-avg_d = activos_admins["Eval Points"].mean() if not activos_admins.empty else 0
-diff_d = avg_d - avg_a
-
-st.markdown('<div class="section-title">📊 ESTADÍSTICAS — ACTIVOS + ADMINS</div>', unsafe_allow_html=True)
-c1, c2, c3 = st.columns(3)
-c1.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--purple)">{len(activos_admins)}</div><div class="stat-lbl">TOTAL PERSONAS</div></div>', unsafe_allow_html=True)
-c2.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--accent)">{avg_d:.3f}</div><div class="stat-lbl">MEDIA EVAL POINTS</div></div>', unsafe_allow_html=True)
-c3.markdown(f'<div class="stat-card"><div class="stat-val" style="color:{"var(--red)" if diff_d < 0 else "var(--green)"}">{diff_d:+.1f}</div><div class="stat-lbl">DIFERENCIA vs SOLO ACTIVOS</div></div>', unsafe_allow_html=True)
-
-st.dataframe(tabla_estadisticas(activos_admins), use_container_width=True, hide_index=True)
