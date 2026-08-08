@@ -1,6 +1,8 @@
 import streamlit as st
 import requests
 import time
+import json
+import sqlite3
 import pandas as pd
 from datetime import datetime, timezone
 
@@ -26,15 +28,51 @@ st.markdown("""
 st.markdown('<div class="page-title">⏳ Inactividad — Última Entrega</div>', unsafe_allow_html=True)
 st.markdown('<div class="page-sub">Estudiantes agrupados por cuánto tiempo llevan sin actividad, con su media de eval points</div>', unsafe_allow_html=True)
 
-st.markdown("""
-<div class="note-box">
-ℹ️ La API de 42 no expone directamente "última entrega" sin consultar proyecto por proyecto
-(algo inviable para miles de estudiantes por límites de rate limit). Como proxy fiable se usa
-<b>updated_at</b> del cursus_user — se actualiza cada vez que hay evaluación, cambio de nivel,
-corrección de puntos, etc. Cuanto más tiempo lleve sin cambiar, más probable que el estudiante
-lleve ese tiempo sin entregar/evaluar nada.
-</div>
-""", unsafe_allow_html=True)
+# ── Caché local con SQLite ──────────────────────────────────────────────────
+# NOTA sobre persistencia: en Streamlit Community Cloud el disco es efímero —
+# sobrevive mientras la app esté "despierta", pero se borra si la app se
+# duerme por inactividad o si haces un redeploy. Sirve para no re-escanear
+# cada vez que cambias de página o recargas dentro de la misma sesión activa,
+# pero no es una base de datos permanente entre despliegues. Si necesitas eso,
+# lo ideal sería un Postgres/SQLite externo (ej. Supabase, Neon, Turso).
+DB_PATH = "inactividad_cache.db"
+
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS scans (
+            scan_key TEXT PRIMARY KEY,
+            scanned_at TEXT,
+            data_json TEXT
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+def save_scan(scan_key, rows):
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        "INSERT OR REPLACE INTO scans (scan_key, scanned_at, data_json) VALUES (?, ?, ?)",
+        (scan_key, datetime.now(timezone.utc).isoformat(), json.dumps(rows)),
+    )
+    conn.commit()
+    conn.close()
+
+def load_scan(scan_key, max_age_hours):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.execute("SELECT scanned_at, data_json FROM scans WHERE scan_key = ?", (scan_key,))
+    row = cur.fetchone()
+    conn.close()
+    if not row:
+        return None, None
+    scanned_at_raw, data_json = row
+    scanned_at = datetime.fromisoformat(scanned_at_raw)
+    age_hours = (datetime.now(timezone.utc) - scanned_at).total_seconds() / 3600
+    if age_hours > max_age_hours:
+        return None, scanned_at
+    return json.loads(data_json), scanned_at
+
+init_db()
 
 # ── Auth (idéntico a tu app) ───────────────────────────────────────────────────
 def get_token():
@@ -94,7 +132,13 @@ with st.sidebar:
     )
     debug = st.checkbox("🐛 Debug (mostrar URLs)", value=False)
 
+    st.markdown("---")
+    st.markdown("### 💾 Caché")
+    usar_cache = st.checkbox("Usar caché si existe", value=True)
+    cache_max_horas = st.number_input("Caché válida por (horas)", 1, 168, 12)
+
     scan_btn = st.button("🚀 Escanear inactividad", type="primary", use_container_width=True)
+    forzar_btn = st.button("🔄 Forzar re-escaneo (ignorar caché)", use_container_width=True)
 
 # ── Scan function with progress bar ────────────────────────────────────────────
 def scan_targets(campus_id, scope, cursus_id, headers, max_pages, debug):
@@ -177,12 +221,35 @@ def scan_targets(campus_id, scope, cursus_id, headers, max_pages, debug):
 
     return rows
 
-# ── Run scan ────────────────────────────────────────────────────────────────
-if scan_btn:
+# ── Run scan (con caché) ────────────────────────────────────────────────────
+scan_key = f"{scope}|{cursus_id}|{campus_id}|{max_pages}"
+
+if forzar_btn:
     rows = scan_targets(campus_id, scope, cursus_id, headers, max_pages, debug)
+    save_scan(scan_key, rows)
     st.session_state["inactividad_rows"] = rows
     st.session_state["scan_ts"] = datetime.now().strftime("%H:%M:%S")
-    st.success(f"✅ Escaneo completo — {len(rows)} registros")
+    st.session_state["scan_source"] = "API (forzado)"
+    st.success(f"✅ Escaneo completo (forzado) — {len(rows)} registros")
+
+elif scan_btn:
+    cached_rows, cached_at = (None, None)
+    if usar_cache:
+        cached_rows, cached_at = load_scan(scan_key, cache_max_horas)
+
+    if cached_rows is not None:
+        rows = cached_rows
+        st.session_state["inactividad_rows"] = rows
+        st.session_state["scan_ts"] = cached_at.strftime("%H:%M:%S %d/%m")
+        st.session_state["scan_source"] = "Caché"
+        st.info(f"💾 Usando caché guardada a las {cached_at.strftime('%H:%M %d/%m')} ({len(rows)} registros). Pulsa 'Forzar re-escaneo' para actualizar.")
+    else:
+        rows = scan_targets(campus_id, scope, cursus_id, headers, max_pages, debug)
+        save_scan(scan_key, rows)
+        st.session_state["inactividad_rows"] = rows
+        st.session_state["scan_ts"] = datetime.now().strftime("%H:%M:%S")
+        st.session_state["scan_source"] = "API"
+        st.success(f"✅ Escaneo completo — {len(rows)} registros (guardado en caché)")
 
 # ── Guard ─────────────────────────────────────────────────────────────────────
 if "inactividad_rows" not in st.session_state:
@@ -202,7 +269,7 @@ if solo_estudiantes_validos:
         & (~df["Blackholeado"])
     ]
 
-st.markdown(f"<small style='color:var(--muted)'>Último escaneo: {ts} · {len(df)} estudiantes con fecha de actividad válida</small>", unsafe_allow_html=True)
+st.markdown(f"<small style='color:var(--muted)'>Último escaneo: {ts} · fuente: {st.session_state.get('scan_source', '—')} · {len(df)} estudiantes con fecha de actividad válida</small>", unsafe_allow_html=True)
 st.markdown("---")
 
 # ── Categorías de inactividad (umbral: "al menos X tiempo sin actividad") ────
