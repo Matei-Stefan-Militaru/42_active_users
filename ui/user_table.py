@@ -121,7 +121,7 @@ def render_raw_data():
     """Renderizar datos raw si están habilitados"""
     if 'users_raw' in st.session_state:
         st.markdown("## 🔍 Datos Raw (Primeros 3 registros)")
-        st.json(st.session_state.users_raw[:3])
+        st.json(st.session_state.users_raw[:5])
 
 def render_info_section(df, selected_country, selected_campus, days_back, search_method):
     """Renderizar información temporal y de contexto"""
