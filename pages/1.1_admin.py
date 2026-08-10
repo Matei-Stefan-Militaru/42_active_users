@@ -165,6 +165,7 @@ def scan_targets(campus_id, scope, cursus_id, headers, max_pages, debug):
                 "Días para empezar": days_to_start,
                 "Level":          round(float(cu.get("level", 0)), 2),
                 "Eval Points":    int(user.get("correction_point", 0) or 0),
+                "Blackholed At":  (end_raw if es_blackholeado and end_raw else bh_raw) or "—",
                 # Solo mostramos fecha para quien está REALMENTE blackholeado, y siempre end_at
                 # (blackholed_at se descarta del todo: es una fecha límite que 42 recalcula).
                 "Blackholed At":  (end_raw or "—") if es_blackholeado else "—",
@@ -330,34 +331,6 @@ def metricas_extra(data):
     bajar_topado = total_capped - (3 * n)
     return avg, mas_de_5, avg_capped, bajar_sin_topar, bajar_topado
 
-def metricas_extra_admin_fijo(estudiantes, admin):
-    """
-    Igual que metricas_extra, pero para grupos mixtos estudiante+admin donde
-    los admins NO se topan ni se les baja puntos: su Eval Points se cuenta
-    siempre a valor real (ni topado en 5, ni parte de la 'bajada'). Solo los
-    puntos de los estudiantes se topan/reducen.
-    """
-    n_est   = len(estudiantes)
-    n_adm   = len(admin)
-    n       = n_est + n_adm
-    if n == 0:
-        return 0, 0, 0, 0, 0
-
-    puntos_est_real = estudiantes["Eval Points"] if n_est else pd.Series([], dtype=float)
-    puntos_adm_real = admin["Eval Points"] if n_adm else pd.Series([], dtype=float)
-
-    total_real = puntos_est_real.sum() + puntos_adm_real.sum()
-    avg = total_real / n
-    mas_de_5 = (puntos_est_real > 5).sum() + (puntos_adm_real > 5).sum()
-    bajar_sin_topar = total_real - (3 * n)
-
-    # Solo se topan los puntos de estudiantes; los admins conservan su valor real
-    total_capped = puntos_est_real.clip(upper=5).sum() + puntos_adm_real.sum()
-    avg_capped = total_capped / n
-    bajar_topado = total_capped - (3 * n)
-
-    return avg, mas_de_5, avg_capped, bajar_sin_topar, bajar_topado
-
 st.markdown("---")
 
 # ── Tabla A: estadísticas — solo alumnos activos ───────────────────────────────
@@ -373,23 +346,25 @@ st.dataframe(tabla_estadisticas(activos_validos), use_container_width=True, hide
 st.markdown("---")
 
 # ── Tabla D: estadísticas — activos + admins (sin futuros) ─────────────────────
-# Los admins SÍ cuentan en el total de personas y en las métricas de "más de 5"
-# y "puntos a bajar", pero su Eval Points nunca se topa ni se reduce: la bajada
-# y el tope en 5 solo se aplican a los puntos de los estudiantes.
+# Las métricas de "topar en 5" / "puntos a bajar para media=3" son solo un criterio
+# de estudiantes y NO se aplican a los admins (son correctores, no se evalúan igual).
+# Por eso aquí solo mostramos el total de personas y la media simple, igual que en
+# la tabla C (activos + futuros + admins).
 admins_para_stats = admins.copy()
 admins_para_stats["Grade (raw)"] = "Admin"
 activos_admins = pd.concat([activos_validos, admins_para_stats], ignore_index=True)
-avg_d, mas_de_5_d, avg_d_capped, bajar_d_sin_topar, bajar_d_topado = metricas_extra_admin_fijo(activos_validos, admins)
+avg_d, mas_de_5_d, avg_d_capped, bajar_d_sin_topar, bajar_d_topado = metricas_extra(activos_admins)
+avg_d = activos_admins["Eval Points"].mean() if not activos_admins.empty else 0
 
 st.markdown('<div class="section-title">📊 ESTADÍSTICAS — ACTIVOS + ADMINS</div>', unsafe_allow_html=True)
 c1, c2, c3, c4, c5, c6 = st.columns(6)
+c1, c2 = st.columns(2)
 c1.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--purple)">{len(activos_admins)}</div><div class="stat-lbl">TOTAL PERSONAS</div></div>', unsafe_allow_html=True)
 c2.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--accent)">{avg_d:.3f}</div><div class="stat-lbl">MEDIA EVAL POINTS</div></div>', unsafe_allow_html=True)
 c3.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--red)">-{bajar_d_sin_topar:.0f}</div><div class="stat-lbl">EVAL POINTS A BAJAR PARA MEDIA=3</div></div>', unsafe_allow_html=True)
 c4.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--purple)">{mas_de_5_d}</div><div class="stat-lbl">CON MÁS DE 5 PUNTOS</div></div>', unsafe_allow_html=True)
 c5.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--orange)">{avg_d_capped:.3f}</div><div class="stat-lbl">MEDIA SI TOPAMOS EN 5</div></div>', unsafe_allow_html=True)
 c6.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--red)">-{bajar_d_topado:.0f}</div><div class="stat-lbl">EVAL POINTS A BAJAR (TOPADO) PARA MEDIA=3</div></div>', unsafe_allow_html=True)
-st.caption("Nota: el tope en 5 y la bajada de puntos solo se aplican a los estudiantes; los admins mantienen su Eval Points real.")
 
 st.dataframe(tabla_estadisticas(activos_admins), use_container_width=True, hide_index=True)
 
