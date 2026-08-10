@@ -165,7 +165,9 @@ def scan_targets(campus_id, scope, cursus_id, headers, max_pages, debug):
                 "Días para empezar": days_to_start,
                 "Level":          round(float(cu.get("level", 0)), 2),
                 "Eval Points":    int(user.get("correction_point", 0) or 0),
-                "Blackholed At":  (end_raw if es_blackholeado and end_raw else bh_raw) or "—",
+                # Solo mostramos fecha para quien está REALMENTE blackholeado, y siempre end_at
+                # (blackholed_at se descarta del todo: es una fecha límite que 42 recalcula).
+                "Blackholed At":  (end_raw or "—") if es_blackholeado else "—",
                 "Blackholeado":   es_blackholeado,
                 "En Riesgo BH":   en_riesgo_bh,
                 "Updated":        cu.get("updated_at", ""),
@@ -268,6 +270,30 @@ else:
 
 st.markdown("---")
 
+# ── Admins — mismo filtro Activo / Pendiente / Blackholeado ────────────────────
+admins_activos       = admins[admins["Estado cursus"] == "🟢 Activo"]
+admins_pendientes    = admins[admins["Estado cursus"] == "🟡 Pendiente (aún no empieza)"]
+admins_blackholeados = admins[admins["Blackholeado"] == True]
+admins_sin_begin     = admins[admins["Estado cursus"] == "❓ Sin begin_at"]
+
+st.markdown(f'<div class="section-title">🛡️ ADMINS — Activo / Pendiente / Blackholeado ({len(admins)})</div>', unsafe_allow_html=True)
+
+ca1, ca2, ca3, ca4 = st.columns(4)
+ca1.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--green)">{len(admins_activos)}</div><div class="stat-lbl">ADMINS ACTIVOS</div></div>', unsafe_allow_html=True)
+ca2.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--orange)">{len(admins_pendientes)}</div><div class="stat-lbl">ADMINS PENDIENTES</div></div>', unsafe_allow_html=True)
+ca3.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--muted)">{len(admins_sin_begin)}</div><div class="stat-lbl">ADMINS SIN begin_at</div></div>', unsafe_allow_html=True)
+ca4.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--red)">{len(admins_blackholeados)}</div><div class="stat-lbl">ADMINS BLACKHOLEADOS</div></div>', unsafe_allow_html=True)
+
+if not admins.empty:
+    cols_admin = ["Login", "Display Name", "Estado cursus", "Begin At", "Blackholed At", "Level", "Eval Points"]
+    st.dataframe(admins[cols_admin].sort_values("Estado cursus"), use_container_width=True, hide_index=True)
+    csv_admins = admins[cols_admin].to_csv(index=False).encode("utf-8")
+    st.download_button("⬇️ Exportar CSV (admins)", csv_admins, "admins_cursus42.csv", "text/csv")
+else:
+    st.info("No hay admins en este escaneo.")
+
+st.markdown("---")
+
 # ── Filtro base: kind=student, y de los Cadets se excluyen los blackholeados ──
 # (Transcender y Alumni ya pasaron esa etapa, así que no se filtran por blackhole aquí)
 es_cadet_valido = (df["Grade (raw)"] == "Cadet") & (~df["Blackholeado"])
@@ -319,19 +345,19 @@ st.dataframe(tabla_estadisticas(activos_validos), use_container_width=True, hide
 st.markdown("---")
 
 # ── Tabla D: estadísticas — activos + admins (sin futuros) ─────────────────────
+# Las métricas de "topar en 5" / "puntos a bajar para media=3" son solo un criterio
+# de estudiantes y NO se aplican a los admins (son correctores, no se evalúan igual).
+# Por eso aquí solo mostramos el total de personas y la media simple, igual que en
+# la tabla C (activos + futuros + admins).
 admins_para_stats = admins.copy()
 admins_para_stats["Grade (raw)"] = "Admin"
 activos_admins = pd.concat([activos_validos, admins_para_stats], ignore_index=True)
-avg_d, mas_de_5_d, avg_d_capped, bajar_d_sin_topar, bajar_d_topado = metricas_extra(activos_admins)
+avg_d = activos_admins["Eval Points"].mean() if not activos_admins.empty else 0
 
 st.markdown('<div class="section-title">📊 ESTADÍSTICAS — ACTIVOS + ADMINS</div>', unsafe_allow_html=True)
-c1, c2, c3, c4, c5, c6 = st.columns(6)
+c1, c2 = st.columns(2)
 c1.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--purple)">{len(activos_admins)}</div><div class="stat-lbl">TOTAL PERSONAS</div></div>', unsafe_allow_html=True)
 c2.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--accent)">{avg_d:.3f}</div><div class="stat-lbl">MEDIA EVAL POINTS</div></div>', unsafe_allow_html=True)
-c3.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--red)">-{bajar_d_sin_topar:.0f}</div><div class="stat-lbl">EVAL POINTS A BAJAR PARA MEDIA=3</div></div>', unsafe_allow_html=True)
-c4.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--purple)">{mas_de_5_d}</div><div class="stat-lbl">CON MÁS DE 5 PUNTOS</div></div>', unsafe_allow_html=True)
-c5.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--orange)">{avg_d_capped:.3f}</div><div class="stat-lbl">MEDIA SI TOPAMOS EN 5</div></div>', unsafe_allow_html=True)
-c6.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--red)">-{bajar_d_topado:.0f}</div><div class="stat-lbl">EVAL POINTS A BAJAR (TOPADO) PARA MEDIA=3</div></div>', unsafe_allow_html=True)
 
 st.dataframe(tabla_estadisticas(activos_admins), use_container_width=True, hide_index=True)
 
