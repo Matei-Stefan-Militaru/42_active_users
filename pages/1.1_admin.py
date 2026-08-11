@@ -148,11 +148,9 @@ def scan_targets(campus_id, scope, cursus_id, headers, max_pages, debug):
             raw_grade = (cu.get("grade") or "").strip()
             bh_raw    = cu.get("blackholed_at")
             end_raw   = cu.get("end_at")
-            is_active_field = user.get("active?", True)
-            # blackholed_at es una fecha LÍMITE que 42 recalcula constantemente
-            # (puede moverse al futuro incluso tras caer, por extensiones/sursis).
-            # El indicador fiable de blackhole real es active?=False + blackholed_at presente.
-            es_blackholeado = (is_active_field is False) and bool(bh_raw)
+            # Blackholeado de verdad = end_at Y blackholed_at ambos presentes.
+            # (blackholed_at solo, sin end_at, es alguien en riesgo/proyectado, no caído aún)
+            es_blackholeado = bool(end_raw) and bool(bh_raw)
             en_riesgo_bh    = bool(bh_raw) and not es_blackholeado
 
             rows.append({
@@ -205,7 +203,7 @@ st.markdown(f"<small style='color:var(--muted)'>Último escaneo: {ts} · {len(df
 pendientes  = df[df["Estado cursus"] == "🟡 Pendiente (aún no empieza)"]
 activos     = df[df["Estado cursus"] == "🟢 Activo"]
 sin_begin   = df[df["Estado cursus"] == "❓ Sin begin_at"]
-blackholeados = df[df["Blackholeado"] == True]
+blackholeados = df[(df["Blackholeado"] == True) & (df["Estado cursus"] != "🟡 Pendiente (aún no empieza)")]
 admins      = df[df["Kind"] == "admin"]
 
 # Nota: el filtro real de "estudiantes válidos" (Alumni/Transcender/Cadet sin blackhole)
