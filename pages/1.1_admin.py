@@ -275,7 +275,7 @@ es_alumni        = df["Grade (raw)"] == "Alumni"
 estudiantes_validos = df[(df["Kind"] == "student") & (es_cadet_valido | es_transcender | es_alumni)]
 
 activos_validos     = estudiantes_validos[estudiantes_validos["Estado cursus"] == "🟢 Activo"]
-pendientes_validos  = estudiantes_validos[(estudiantes_validos["Estado cursus"] == "🟡 Pendiente (aún no empieza)") & (~estudiantes_validos["Blackholeado"])]
+pendientes_validos  = df[(df["Kind"] == "student") & (df["Estado cursus"] == "🟡 Pendiente (aún no empieza)") & (~df["Blackholeado"])]
 
 def tabla_estadisticas(data, group_col="Grade (raw)"):
     """Devuelve un DataFrame de estadísticas agregadas (conteo, media, total) por grupo."""
@@ -302,6 +302,28 @@ def metricas_extra(data):
     bajar_topado = total_capped - (3 * n)
     return avg, mas_de_5, avg_capped, bajar_sin_topar, bajar_topado
 
+def metricas_extra_mixed(grupo_completo, subgrupo_afectado):
+    """
+    Igual que metricas_extra, pero el 'más de 5' y el tope en 5 solo se aplican
+    al subgrupo_afectado (ej. solo estudiantes) — el resto del grupo (ej. admins)
+    mantiene sus puntos intactos, sin recortar ni contar en 'más de 5'.
+    """
+    n = len(grupo_completo)
+    avg = grupo_completo["Eval Points"].mean() if n else 0
+
+    mas_de_5 = (subgrupo_afectado["Eval Points"] > 5).sum() if len(subgrupo_afectado) else 0
+
+    total_sin_topar = grupo_completo["Eval Points"].sum() if n else 0
+    bajar_sin_topar = total_sin_topar - (3 * n)
+
+    resto_sum = grupo_completo["Eval Points"].sum() - subgrupo_afectado["Eval Points"].sum()
+    subgrupo_capped_sum = subgrupo_afectado["Eval Points"].clip(upper=5).sum() if len(subgrupo_afectado) else 0
+    total_capped = resto_sum + subgrupo_capped_sum
+    avg_capped = total_capped / n if n else 0
+    bajar_topado = total_capped - (3 * n)
+
+    return avg, mas_de_5, avg_capped, bajar_sin_topar, bajar_topado
+
 st.markdown("---")
 
 # ── Tabla A: estadísticas — solo alumnos activos ───────────────────────────────
@@ -320,7 +342,7 @@ st.markdown("---")
 admins_para_stats = admins.copy()
 admins_para_stats["Grade (raw)"] = "Admin"
 activos_admins = pd.concat([activos_validos, admins_para_stats], ignore_index=True)
-avg_d, mas_de_5_d, avg_d_capped, bajar_d_sin_topar, bajar_d_topado = metricas_extra(activos_admins)
+avg_d, mas_de_5_d, avg_d_capped, bajar_d_sin_topar, bajar_d_topado = metricas_extra_mixed(activos_admins, activos_validos)
 
 st.markdown('<div class="section-title">📊 ESTADÍSTICAS — ACTIVOS + ADMINS</div>', unsafe_allow_html=True)
 c1, c2, c3, c4, c5, c6 = st.columns(6)
