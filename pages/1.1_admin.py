@@ -257,12 +257,24 @@ st.markdown("---")
 # ── Blackholeados ───────────────────────────────────────────────────────────────
 st.markdown(f'<div class="section-title">🕳️ BLACKHOLEADOS ({len(blackholeados)})</div>', unsafe_allow_html=True)
 if not blackholeados.empty:
-    tabla_bh = blackholeados[["Login", "Display Name", "Kind", "Grade (raw)", "Level", "Eval Points", "Blackholed At"]].rename(columns={"Blackholed At": "Fecha Blackhole (end_at)"}).sort_values("Fecha Blackhole (end_at)", ascending=False)
+    tabla_bh = blackholeados[["Login", "Display Name", "Kind", "Grade (raw)", "Level", "Eval Points", "Blackholed At", "Updated"]].rename(columns={"Blackholed At": "Fecha Blackhole (end_at)"}).sort_values("Fecha Blackhole (end_at)", ascending=False)
     st.dataframe(tabla_bh, use_container_width=True, hide_index=True)
     csv_bh = tabla_bh.to_csv(index=False).encode("utf-8")
     st.download_button("⬇️ Exportar CSV (blackholeados)", csv_bh, "blackholeados.csv", "text/csv")
 else:
     st.info("No hay blackholeados en este escaneo.")
+
+st.markdown("---")
+
+# ── Admins ────────────────────────────────────────────────────────────────────
+st.markdown(f'<div class="section-title">🛡️ ADMINS ({len(admins)})</div>', unsafe_allow_html=True)
+if not admins.empty:
+    tabla_admins = admins[["Login", "Display Name", "Kind", "Grade (raw)", "Estado cursus", "Level", "Eval Points", "Updated"]].sort_values("Login")
+    st.dataframe(tabla_admins, use_container_width=True, hide_index=True)
+    csv_admins = tabla_admins.to_csv(index=False).encode("utf-8")
+    st.download_button("⬇️ Exportar CSV (admins)", csv_admins, "admins_cursus42.csv", "text/csv")
+else:
+    st.info("No hay admins en este escaneo.")
 
 st.markdown("---")
 
