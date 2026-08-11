@@ -200,7 +200,7 @@ df = pd.DataFrame(rows)
 st.markdown(f"<small style='color:var(--muted)'>Último escaneo: {ts} · {len(df)} registros</small>", unsafe_allow_html=True)
 
 # ── Stats ─────────────────────────────────────────────────────────────────────
-pendientes  = df[df["Estado cursus"] == "🟡 Pendiente (aún no empieza)"]
+pendientes  = df[(df["Estado cursus"] == "🟡 Pendiente (aún no empieza)") & (~df["Blackholeado"])]
 activos     = df[df["Estado cursus"] == "🟢 Activo"]
 sin_begin   = df[df["Estado cursus"] == "❓ Sin begin_at"]
 blackholeados = df[(df["Blackholeado"] == True) & (df["Estado cursus"] != "🟡 Pendiente (aún no empieza)")]
@@ -275,7 +275,7 @@ es_alumni        = df["Grade (raw)"] == "Alumni"
 estudiantes_validos = df[(df["Kind"] == "student") & (es_cadet_valido | es_transcender | es_alumni)]
 
 activos_validos     = estudiantes_validos[estudiantes_validos["Estado cursus"] == "🟢 Activo"]
-pendientes_validos  = estudiantes_validos[estudiantes_validos["Estado cursus"] == "🟡 Pendiente (aún no empieza)"]
+pendientes_validos  = estudiantes_validos[(estudiantes_validos["Estado cursus"] == "🟡 Pendiente (aún no empieza)") & (~estudiantes_validos["Blackholeado"])]
 
 def tabla_estadisticas(data, group_col="Grade (raw)"):
     """Devuelve un DataFrame de estadísticas agregadas (conteo, media, total) por grupo."""
