@@ -24,7 +24,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown('<div class="page-title">🪜 Cadets por Nivel</div>', unsafe_allow_html=True)
-st.markdown('<div class="page-sub">Solo Cadets activos (sin futuros, sin blackhole), agrupados en brackets de nivel de 3 en 3</div>', unsafe_allow_html=True)
+st.markdown('<div class="page-sub">Solo Cadets activos (sin futuros, sin blackhole), agrupados en brackets de nivel de 2 en 2</div>', unsafe_allow_html=True)
 
 # ── Auth (idéntico a tu app) ───────────────────────────────────────────────────
 def get_token():
@@ -188,33 +188,83 @@ cadets = df[
     & (~df["Blackholeado"])
 ].copy()
 
-# ── Bracket de nivel, de 3 en 3, empezando en 0 (0-3, 3-6, 6-9, ...) ──────────
-def bracket_de_nivel(level):
-    inicio = math.floor(level / 3) * 3
-    fin = inicio + 3
-    return f"{inicio}-{fin}"
+# ── Bracket de nivel, de 2 en 2, tope en nivel 12 (0-1.99, 2-3.99, ..., 12+) ──
+STEP      = 2
+MAX_LEVEL = 12
+
+def bracket_de_nivel(level, step=STEP, max_level=MAX_LEVEL):
+    if level >= max_level:
+        return f"{max_level}+"
+    inicio = math.floor(level / step) * step
+    fin = inicio + step
+    return f"{inicio}-{fin - 0.01:.2f}"
+
+def bracket_orden(level, step=STEP, max_level=MAX_LEVEL):
+    return min(math.floor(level / step) * step, max_level)
 
 cadets["Nivel (bracket)"] = cadets["Level"].apply(bracket_de_nivel)
-# Para ordenar los brackets correctamente (no alfabéticamente)
-cadets["_bracket_orden"] = cadets["Level"].apply(lambda l: math.floor(l / 3) * 3)
+cadets["_bracket_orden"]  = cadets["Level"].apply(bracket_orden)
 
 st.markdown(f"<small style='color:var(--muted)'>Último escaneo: {ts} · {len(cadets)} cadets activos (sin futuros, sin blackhole)</small>", unsafe_allow_html=True)
 st.markdown("---")
 
-st.markdown('<div class="section-title">🪜 CADETS POR NIVEL (brackets de 3 en 3)</div>', unsafe_allow_html=True)
+# ── Tabla de estadísticas por bracket ─────────────────────────────────────────
+st.markdown('<div class="section-title">📊 ESTADÍSTICAS POR BRACKET DE NIVEL (de 2 en 2, hasta 12)</div>', unsafe_allow_html=True)
 
-tabla_final = cadets[
-    ["Nivel (bracket)", "Login", "Display Name", "Level", "Eval Points", "Updated", "_bracket_orden"]
-].sort_values(["_bracket_orden", "Level"], ascending=[True, False]).drop(columns="_bracket_orden")
+stats = (
+    cadets.groupby(["_bracket_orden", "Nivel (bracket)"], as_index=False)
+    .agg(
+        **{
+            "Nº Estudiantes": ("Login", "count"),
+            "Media Level":    ("Level", "mean"),
+            "Media Puntos":   ("Eval Points", "mean"),
+        }
+    )
+    .sort_values("_bracket_orden")
+    .drop(columns="_bracket_orden")
+    .rename(columns={"Nivel (bracket)": "Bracket de Nivel"})
+)
+
+stats["Media Level"]  = stats["Media Level"].round(2)
+stats["Media Puntos"] = stats["Media Puntos"].round(2)
+
+# Añadir fila de totales
+total_row = pd.DataFrame([{
+    "Bracket de Nivel": "TOTAL",
+    "Nº Estudiantes":   cadets.shape[0],
+    "Media Level":      round(cadets["Level"].mean(), 2) if not cadets.empty else 0,
+    "Media Puntos":     round(cadets["Eval Points"].mean(), 2) if not cadets.empty else 0,
+}])
+stats_con_total = pd.concat([stats, total_row], ignore_index=True)
 
 st.dataframe(
-    tabla_final,
+    stats_con_total,
     use_container_width=True,
     hide_index=True,
     column_config={
-        "Level": st.column_config.ProgressColumn("Level", min_value=0, max_value=21, format="%.2f"),
+        "Nº Estudiantes": st.column_config.NumberColumn("Nº Estudiantes"),
+        "Media Level":    st.column_config.NumberColumn("Media Level", format="%.2f"),
+        "Media Puntos":   st.column_config.NumberColumn("Media Puntos", format="%.2f"),
     }
 )
 
-csv = tabla_final.to_csv(index=False).encode("utf-8")
-st.download_button("⬇️ Exportar CSV (cadets por nivel)", csv, "cadets_por_nivel.csv", "text/csv")
+csv_stats = stats.to_csv(index=False).encode("utf-8")
+st.download_button("⬇️ Exportar CSV (estadísticas por bracket)", csv_stats, "estadisticas_por_bracket.csv", "text/csv")
+
+# ── Detalle completo (opcional, plegado) ──────────────────────────────────────
+with st.expander("🪜 Ver detalle de cadets por nivel (tabla completa)"):
+    tabla_final = cadets[
+        ["Nivel (bracket)", "Login", "Display Name", "Level", "Eval Points", "Updated", "_bracket_orden"]
+    ].sort_values(["_bracket_orden", "Level"], ascending=[True, False]).drop(columns="_bracket_orden")
+
+    st.dataframe(
+        tabla_final,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Level": st.column_config.ProgressColumn("Level", min_value=0, max_value=21, format="%.2f"),
+        }
+    )
+
+    csv = tabla_final.to_csv(index=False).encode("utf-8")
+    st.download_button("⬇️ Exportar CSV (cadets por nivel, detalle)", csv, "cadets_por_nivel.csv", "text/csv")
