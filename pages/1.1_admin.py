@@ -303,16 +303,28 @@ def tabla_estadisticas(data, group_col="Grade (raw)"):
     return stats
 
 def metricas_extra(data):
-    """Calcula las métricas de 'más de 5 puntos' / topado en 5 / puntos a bajar para media=3."""
+    """
+    Calcula las métricas de 'más de 5 puntos' y los puntos necesarios para
+    alcanzar media=3 y media=4 (sin topar y topando en 5).
+
+    Convención de signo (SIN "-" forzado):
+    - Valor POSITIVO = sobran puntos, hay que BAJAR esa cantidad para llegar a la media objetivo.
+    - Valor NEGATIVO = faltan puntos, haría falta SUBIR esa cantidad (valor absoluto) para llegar a la media objetivo.
+    """
     n = len(data)
     avg = data["Eval Points"].mean() if n else 0
     mas_de_5 = (data["Eval Points"] > 5).sum() if n else 0
+
     total_sin_topar = data["Eval Points"].sum() if n else 0
-    bajar_sin_topar = total_sin_topar - (3 * n)
+    para_3_sin_topar = total_sin_topar - (3 * n)
+    para_4_sin_topar = total_sin_topar - (4 * n)
+
     avg_capped = data["Eval Points"].clip(upper=5).mean() if n else 0
     total_capped = data["Eval Points"].clip(upper=5).sum() if n else 0
-    bajar_topado = total_capped - (3 * n)
-    return avg, mas_de_5, avg_capped, bajar_sin_topar, bajar_topado
+    para_3_topado = total_capped - (3 * n)
+    para_4_topado = total_capped - (4 * n)
+
+    return avg, mas_de_5, avg_capped, para_3_sin_topar, para_3_topado, para_4_sin_topar, para_4_topado
 
 def metricas_extra_mixed(grupo_completo, subgrupo_afectado):
     """
@@ -326,15 +338,17 @@ def metricas_extra_mixed(grupo_completo, subgrupo_afectado):
     mas_de_5 = (subgrupo_afectado["Eval Points"] > 5).sum() if len(subgrupo_afectado) else 0
 
     total_sin_topar = grupo_completo["Eval Points"].sum() if n else 0
-    bajar_sin_topar = total_sin_topar - (3 * n)
+    para_3_sin_topar = total_sin_topar - (3 * n)
+    para_4_sin_topar = total_sin_topar - (4 * n)
 
     resto_sum = grupo_completo["Eval Points"].sum() - subgrupo_afectado["Eval Points"].sum()
     subgrupo_capped_sum = subgrupo_afectado["Eval Points"].clip(upper=5).sum() if len(subgrupo_afectado) else 0
     total_capped = resto_sum + subgrupo_capped_sum
     avg_capped = total_capped / n if n else 0
-    bajar_topado = total_capped - (3 * n)
+    para_3_topado = total_capped - (3 * n)
+    para_4_topado = total_capped - (4 * n)
 
-    return avg, mas_de_5, avg_capped, bajar_sin_topar, bajar_topado
+    return avg, mas_de_5, avg_capped, para_3_sin_topar, para_3_topado, para_4_sin_topar, para_4_topado
 
 st.markdown("---")
 
@@ -354,16 +368,22 @@ st.markdown("---")
 admins_para_stats = admins.copy()
 admins_para_stats["Grade (raw)"] = "Admin"
 activos_admins = pd.concat([activos_validos, admins_para_stats], ignore_index=True)
-avg_d, mas_de_5_d, avg_d_capped, bajar_d_sin_topar, bajar_d_topado = metricas_extra_mixed(activos_admins, activos_validos)
+(avg_d, mas_de_5_d, avg_d_capped,
+ para_3_sin_topar_d, para_3_topado_d,
+ para_4_sin_topar_d, para_4_topado_d) = metricas_extra_mixed(activos_admins, activos_validos)
 
 st.markdown('<div class="section-title">📊 ESTADÍSTICAS — ACTIVOS + ADMINS</div>', unsafe_allow_html=True)
-c1, c2, c3, c4, c5, c6 = st.columns(6)
+c1, c2, c3, c4 = st.columns(4)
 c1.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--purple)">{len(activos_admins)}</div><div class="stat-lbl">TOTAL PERSONAS</div></div>', unsafe_allow_html=True)
 c2.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--accent)">{avg_d:.3f}</div><div class="stat-lbl">MEDIA EVAL POINTS</div></div>', unsafe_allow_html=True)
-c3.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--red)">-{bajar_d_sin_topar:.0f}</div><div class="stat-lbl">EVAL POINTS A BAJAR PARA MEDIA=3</div></div>', unsafe_allow_html=True)
-c4.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--purple)">{mas_de_5_d}</div><div class="stat-lbl">CON MÁS DE 5 PUNTOS</div></div>', unsafe_allow_html=True)
-c5.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--orange)">{avg_d_capped:.3f}</div><div class="stat-lbl">MEDIA SI TOPAMOS EN 5</div></div>', unsafe_allow_html=True)
-c6.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--red)">-{bajar_d_topado:.0f}</div><div class="stat-lbl">EVAL POINTS A BAJAR (TOPADO) PARA MEDIA=3</div></div>', unsafe_allow_html=True)
+c3.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--red)">{para_3_sin_topar_d:.0f}</div><div class="stat-lbl">EVAL POINTS PARA MEDIA=3</div></div>', unsafe_allow_html=True)
+c4.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--red)">{para_4_sin_topar_d:.0f}</div><div class="stat-lbl">EVAL POINTS PARA MEDIA=4</div></div>', unsafe_allow_html=True)
+
+c5, c6, c7, c8 = st.columns(4)
+c5.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--purple)">{mas_de_5_d}</div><div class="stat-lbl">CON MÁS DE 5 PUNTOS</div></div>', unsafe_allow_html=True)
+c6.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--orange)">{avg_d_capped:.3f}</div><div class="stat-lbl">MEDIA SI TOPAMOS EN 5</div></div>', unsafe_allow_html=True)
+c7.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--red)">{para_3_topado_d:.0f}</div><div class="stat-lbl">EVAL POINTS PARA MEDIA=3 (TOPADO)</div></div>', unsafe_allow_html=True)
+c8.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--red)">{para_4_topado_d:.0f}</div><div class="stat-lbl">EVAL POINTS PARA MEDIA=4 (TOPADO)</div></div>', unsafe_allow_html=True)
 
 st.dataframe(tabla_estadisticas(activos_admins), use_container_width=True, hide_index=True)
 
@@ -371,16 +391,22 @@ st.markdown("---")
 
 # ── Tabla B: estadísticas — activos + futuros (pendientes) ────────────────────
 activos_y_futuros = pd.concat([activos_validos, pendientes_validos], ignore_index=True)
-avg_b, mas_de_5_b, avg_b_capped, bajar_b_sin_topar, bajar_b_topado = metricas_extra(activos_y_futuros)
+(avg_b, mas_de_5_b, avg_b_capped,
+ para_3_sin_topar_b, para_3_topado_b,
+ para_4_sin_topar_b, para_4_topado_b) = metricas_extra(activos_y_futuros)
 
 st.markdown('<div class="section-title">📊 ESTADÍSTICAS — ACTIVOS + FUTUROS</div>', unsafe_allow_html=True)
-c1, c2, c3, c4, c5, c6 = st.columns(6)
+c1, c2, c3, c4 = st.columns(4)
 c1.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--orange)">{len(activos_y_futuros)}</div><div class="stat-lbl">TOTAL ESTUDIANTES</div></div>', unsafe_allow_html=True)
 c2.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--accent)">{avg_b:.3f}</div><div class="stat-lbl">MEDIA EVAL POINTS</div></div>', unsafe_allow_html=True)
-c3.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--red)">-{bajar_b_sin_topar:.0f}</div><div class="stat-lbl">EVAL POINTS A BAJAR PARA MEDIA=3</div></div>', unsafe_allow_html=True)
-c4.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--purple)">{mas_de_5_b}</div><div class="stat-lbl">CON MÁS DE 5 PUNTOS</div></div>', unsafe_allow_html=True)
-c5.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--orange)">{avg_b_capped:.3f}</div><div class="stat-lbl">MEDIA SI TOPAMOS EN 5</div></div>', unsafe_allow_html=True)
-c6.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--red)">-{bajar_b_topado:.0f}</div><div class="stat-lbl">EVAL POINTS A BAJAR (TOPADO) PARA MEDIA=3</div></div>', unsafe_allow_html=True)
+c3.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--red)">{para_3_sin_topar_b:.0f}</div><div class="stat-lbl">EVAL POINTS PARA MEDIA=3</div></div>', unsafe_allow_html=True)
+c4.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--red)">{para_4_sin_topar_b:.0f}</div><div class="stat-lbl">EVAL POINTS PARA MEDIA=4</div></div>', unsafe_allow_html=True)
+
+c5, c6, c7, c8 = st.columns(4)
+c5.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--purple)">{mas_de_5_b}</div><div class="stat-lbl">CON MÁS DE 5 PUNTOS</div></div>', unsafe_allow_html=True)
+c6.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--orange)">{avg_b_capped:.3f}</div><div class="stat-lbl">MEDIA SI TOPAMOS EN 5</div></div>', unsafe_allow_html=True)
+c7.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--red)">{para_3_topado_b:.0f}</div><div class="stat-lbl">EVAL POINTS PARA MEDIA=3 (TOPADO)</div></div>', unsafe_allow_html=True)
+c8.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--red)">{para_4_topado_b:.0f}</div><div class="stat-lbl">EVAL POINTS PARA MEDIA=4 (TOPADO)</div></div>', unsafe_allow_html=True)
 
 st.dataframe(tabla_estadisticas(activos_y_futuros), use_container_width=True, hide_index=True)
 
