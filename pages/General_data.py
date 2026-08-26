@@ -278,8 +278,11 @@ if scan_btn:
     rows = scan_targets(campus_id, scope, cursus_id, headers, max_pages, debug)
     st.session_state["cursus_status_rows"] = rows
     st.session_state["scan_ts"] = datetime.now().strftime("%H:%M:%S")
-    save_to_db(rows, campus_id, cursus_id, scope)
-    st.success(f"✅ Escaneo completo — {len(rows)} registros guardados en BD")
+    st.session_state["general_data_users"] = [
+        {"Login": r["Login"], "Display Name": r["Display Name"], "Grade": r["Grade (raw)"], "Eval Points": r["Eval Points"]}
+        for r in rows
+    ]
+    st.success(f"✅ Escaneo completo — {len(rows)} registros guardados")
 
 # ── Guard ─────────────────────────────────────────────────────────────────────
 if "cursus_status_rows" not in st.session_state:

@@ -2,9 +2,6 @@ import streamlit as st
 import requests
 import time
 import pandas as pd
-import sqlite3
-import os
-from datetime import datetime, timezone
 
 POOL_REASONS = {
     "Provided points to the pool.",
@@ -14,8 +11,6 @@ ROBIN_HOOD_REASONS = {
     "Roobin Hood",
     "Robin Hood",
 }
-
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "general_data.db")
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(page_title="42 Eval Piscine — Pool & Robin Hood", page_icon="🏊", layout="wide")
@@ -39,7 +34,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown('<div class="page-title">🏊 Eval Piscine — Pool & Robin Hood</div>', unsafe_allow_html=True)
-st.markdown('<div class="page-sub">Carga los usuarios desde General Data (BD) y descarga su historial de puntos para filtrar pool y Robin Hood</div>', unsafe_allow_html=True)
+st.markdown('<div class="page-sub">Carga los usuarios desde General Data y descarga su historial de puntos para filtrar pool y Robin Hood</div>', unsafe_allow_html=True)
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
 def get_token():
@@ -100,25 +95,6 @@ if not headers:
     st.error("❌ No se pudo autenticar. Revisa los secrets.")
     st.stop()
 
-# ── Load users from DB ───────────────────────────────────────────────────────
-def load_users_from_db():
-    if not os.path.exists(DB_PATH):
-        return None, None
-    conn = sqlite3.connect(DB_PATH)
-    df = pd.read_sql_query("SELECT * FROM scan_results", conn)
-    conn.close()
-    if df.empty:
-        return None, None
-    scanned_at = df["scanned_at"].iloc[0]
-    users = []
-    for _, row in df.iterrows():
-        users.append({
-            "Login": row["login"],
-            "Display Name": row["display_name"],
-            "Eval Points": row["eval_points"],
-        })
-    return users, scanned_at
-
 # ── Fetch correction point history ────────────────────────────────────────────
 def fetch_correction_history(login, headers, max_pages=20):
     all_records = []
@@ -149,13 +125,16 @@ with st.sidebar:
     debug = st.checkbox("🐛 Debug", value=False)
     scan_btn = st.button("🚀 Descargar historiales", type="primary", use_container_width=True)
 
-# ── Check DB ──────────────────────────────────────────────────────────────────
-users_from_db, db_scan_ts = load_users_from_db()
-if users_from_db is None:
-    st.warning("⚠️ No hay datos en la BD de General Data. Primero ejecuta un escaneo en esa pagina.")
+# ── Check session ─────────────────────────────────────────────────────────────
+users_from_session = st.session_state.get("general_data_users")
+if not users_from_session:
+    st.warning("⚠️ No hay usuarios en memoria. Primero ejecuta un escaneo en General Data.")
     st.stop()
 
-st.markdown(f"<small style='color:var(--muted)'>BD General Data: {db_scan_ts} · {len(users_from_db)} usuarios</small>", unsafe_allow_html=True)
+ALLOWED_GRADES = {"Cadet", "Transcender", "Alumni"}
+users_from_session = [u for u in users_from_session if u.get("Grade") in ALLOWED_GRADES]
+
+st.markdown(f"<small style='color:var(--muted)'>Usuarios de General Data (Cadet/Transcender/Alumni): {len(users_from_session)}</small>", unsafe_allow_html=True)
 
 # ── Run ───────────────────────────────────────────────────────────────────────
 if scan_btn:
@@ -167,7 +146,7 @@ if scan_btn:
     bar = st.progress(0, text="Descargando historiales...")
     status = st.empty()
 
-    for u in users_from_db:
+    for u in users_from_session:
         login = u["Login"]
         records = fetch_correction_history(login, headers)
         processed += 1
@@ -191,7 +170,7 @@ if scan_btn:
         all_pool_records.extend(user_pool)
         all_robin_records.extend(user_robin)
 
-        bar.progress(min(processed / len(users_from_db), 1.0), text=f"Historial {processed}/{len(users_from_db)}")
+        bar.progress(min(processed / len(users_from_session), 1.0), text=f"Historial {processed}/{len(users_from_session)}")
         status.text(f"{login} — pool: {len(user_pool)} | robin: {len(user_robin)}")
 
     bar.empty()
@@ -201,7 +180,7 @@ if scan_btn:
     st.session_state["eval_pool_records"] = all_pool_records
     st.session_state["eval_robin_records"] = all_robin_records
     st.session_state["eval_ts"] = datetime.now().strftime("%H:%M:%S")
-    st.success(f"✅ Listo — {len(users_from_db)} usuarios · {len(all_pool_records)} pool · {len(all_robin_records)} Robin Hood")
+    st.success(f"✅ Listo — {len(users_from_session)} usuarios · {len(all_pool_records)} pool · {len(all_robin_records)} Robin Hood")
 
 # ── Guard ─────────────────────────────────────────────────────────────────────
 if "eval_history" not in st.session_state:
