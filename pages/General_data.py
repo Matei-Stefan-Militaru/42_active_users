@@ -205,9 +205,11 @@ if scan_btn:
         {"Login": r["Login"], "Display Name": r["Display Name"], "Grade": r["Grade (raw)"], "Blackholeado": r["Blackholeado"], "Eval Points": r["Eval Points"]}
         for r in rows
     ]
-    export_data = json.dumps({"rows": rows, "ts": datetime.now().strftime("%H:%M:%S"), "general_data_users": st.session_state["general_data_users"]}, ensure_ascii=False, default=str)
+    ALLOWED_GRADES = {"Cadet", "Transcender", "Alumni"}
+    filtered_users = [u for u in st.session_state["general_data_users"] if u.get("Grade") in ALLOWED_GRADES]
+    export_data = json.dumps({"rows": rows, "ts": datetime.now().strftime("%H:%M:%S"), "general_data_users": filtered_users}, ensure_ascii=False, default=str)
     st.session_state["general_data_export"] = export_data
-    st.success(f"✅ Escaneo completo — {len(rows)} registros guardados")
+    st.success(f"✅ Escaneo completo — {len(rows)} registros guardados ({len(filtered_users)} Cadet/Transcender/Alumni en JSON)")
 
 # ── Guard ─────────────────────────────────────────────────────────────────────
 if "cursus_status_rows" not in st.session_state:
