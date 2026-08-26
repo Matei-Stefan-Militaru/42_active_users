@@ -6,9 +6,17 @@ import sqlite3
 import os
 from datetime import datetime, timezone
 
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "general_data.db")
+_base_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
+try:
+    os.makedirs(_base_dir, exist_ok=True)
+    DB_PATH = os.path.join(_base_dir, "general_data.db")
+    # Test write access
+    sqlite3.connect(DB_PATH).close()
+except (OSError, sqlite3.OperationalError):
+    DB_PATH = os.path.join("/tmp", "general_data.db")
 
 def init_db():
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS scan_results (
