@@ -3,6 +3,18 @@ import requests
 import time
 import json
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+
+MADRID_TZ = ZoneInfo("Europe/Madrid")
+
+def parse_api_datetime(value):
+    """Convierte un string ISO de la API (con 'Z') a datetime timezone-aware en UTC. None si no parsea."""
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except Exception:
+        return None
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(page_title="42 Raw — Correction Point Historics", page_icon="🔍", layout="wide")
@@ -113,7 +125,19 @@ with st.sidebar:
     max_pages = st.number_input("Páginas máx (si 'traer todas')", 1, 200, 20, disabled=not fetch_all)
 
     debug = st.checkbox("🐛 Mostrar URL exacta", value=True)
-    invertir = st.checkbox("🔄 Últimas modificaciones primero (invertir orden)", value=True)
+
+    st.markdown("---")
+    st.markdown("**Orden y filtro por fecha (aplicado en el cliente)**")
+    campo_fecha = st.selectbox("Campo de fecha", ["updated_at", "created_at"], index=0)
+    invertir = st.checkbox("🔄 Últimas modificaciones primero", value=True)
+
+    filtrar_fecha = st.checkbox("📅 Filtrar: solo posteriores a...", value=True)
+    col_f, col_h = st.columns(2)
+    with col_f:
+        cutoff_date = st.date_input("Fecha", value=datetime(2026, 8, 26).date(), format="DD/MM/YYYY", disabled=not filtrar_fecha)
+    with col_h:
+        cutoff_time = st.time_input("Hora", value=datetime(2026, 8, 26, 15, 20).time(), disabled=not filtrar_fecha)
+    st.caption("Hora local Europe/Madrid")
 
     fetch_btn = st.button("🚀 Fetch raw", type="primary", use_container_width=True)
 
@@ -247,23 +271,49 @@ st.markdown('<div class="section-title">📋 RESPONSE HEADERS</div>', unsafe_all
 with st.expander("Ver headers completos"):
     st.json(resp_headers)
 
-orden_label = "🔄 más recientes primero" if (invertir and isinstance(raw_data, list)) else "orden original de la API"
-st.markdown(f'<div class="section-title">🧾 RAW JSON ({orden_label})</div>', unsafe_allow_html=True)
+if raw_data is not None and isinstance(raw_data, list):
 
-if raw_data is not None:
-    # Por defecto la API devuelve id/created_at ascendente (más antiguo primero).
-    # Si "invertir" está marcado, mostramos la lista al revés → últimas modificaciones primero.
-    raw_data_mostrado = list(reversed(raw_data)) if (invertir and isinstance(raw_data, list)) else raw_data
+    # ── Ordenar por el valor real del campo de fecha elegido ──────────────────
+    # Los registros sin fecha parseable se mandan al final, para no romper el sort.
+    raw_data_ordenado = sorted(
+        raw_data,
+        key=lambda d: parse_api_datetime(d.get(campo_fecha)) or datetime.min.replace(tzinfo=timezone.utc),
+        reverse=invertir,
+    )
 
-    st.json(raw_data_mostrado)
+    # ── Filtrar por cutoff (hora local Europe/Madrid → convertida a UTC) ──────
+    cutoff_dt = None
+    if filtrar_fecha:
+        cutoff_naive = datetime.combine(cutoff_date, cutoff_time)
+        cutoff_dt = cutoff_naive.replace(tzinfo=MADRID_TZ).astimezone(timezone.utc)
 
-    raw_json_str = json.dumps(raw_data_mostrado, indent=2, ensure_ascii=False)
+        raw_data_final = [
+            d for d in raw_data_ordenado
+            if (parse_api_datetime(d.get(campo_fecha)) is not None
+                and parse_api_datetime(d.get(campo_fecha)) > cutoff_dt)
+        ]
+    else:
+        raw_data_final = raw_data_ordenado
+
+    orden_label = "más recientes primero" if invertir else "más antiguos primero"
+    filtro_label = f" · solo {campo_fecha} > {cutoff_date.strftime('%d/%m/%Y')} {cutoff_time.strftime('%H:%M')} (Madrid)" if filtrar_fecha else ""
+    st.markdown(f'<div class="section-title">🧾 RAW JSON — ordenado por {campo_fecha}, {orden_label}{filtro_label}</div>', unsafe_allow_html=True)
+
+    if filtrar_fecha:
+        st.caption(f"Mostrando {len(raw_data_final)} de {len(raw_data_ordenado)} registros totales (cutoff en UTC: {cutoff_dt.isoformat()})")
+
+    st.json(raw_data_final)
+
+    raw_json_str = json.dumps(raw_data_final, indent=2, ensure_ascii=False)
     st.download_button(
         "⬇️ Descargar raw JSON",
         raw_json_str.encode("utf-8"),
         "correction_point_historics_raw.json",
         "application/json",
     )
+elif raw_data is not None:
+    st.markdown('<div class="section-title">🧾 RAW JSON</div>', unsafe_allow_html=True)
+    st.json(raw_data)
 else:
     st.markdown('<div class="section-title">⚠️ RESPUESTA NO-JSON / ERROR</div>', unsafe_allow_html=True)
     st.code(st.session_state.get("raw_text", "(sin contenido)"))
