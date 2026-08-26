@@ -113,6 +113,7 @@ with st.sidebar:
     max_pages = st.number_input("Páginas máx (si 'traer todas')", 1, 200, 20, disabled=not fetch_all)
 
     debug = st.checkbox("🐛 Mostrar URL exacta", value=True)
+    invertir = st.checkbox("🔄 Últimas modificaciones primero (invertir orden)", value=True)
 
     fetch_btn = st.button("🚀 Fetch raw", type="primary", use_container_width=True)
 
@@ -246,12 +247,17 @@ st.markdown('<div class="section-title">📋 RESPONSE HEADERS</div>', unsafe_all
 with st.expander("Ver headers completos"):
     st.json(resp_headers)
 
-st.markdown('<div class="section-title">🧾 RAW JSON</div>', unsafe_allow_html=True)
+orden_label = "🔄 más recientes primero" if (invertir and isinstance(raw_data, list)) else "orden original de la API"
+st.markdown(f'<div class="section-title">🧾 RAW JSON ({orden_label})</div>', unsafe_allow_html=True)
 
 if raw_data is not None:
-    st.json(raw_data)
+    # Por defecto la API devuelve id/created_at ascendente (más antiguo primero).
+    # Si "invertir" está marcado, mostramos la lista al revés → últimas modificaciones primero.
+    raw_data_mostrado = list(reversed(raw_data)) if (invertir and isinstance(raw_data, list)) else raw_data
 
-    raw_json_str = json.dumps(raw_data, indent=2, ensure_ascii=False)
+    st.json(raw_data_mostrado)
+
+    raw_json_str = json.dumps(raw_data_mostrado, indent=2, ensure_ascii=False)
     st.download_button(
         "⬇️ Descargar raw JSON",
         raw_json_str.encode("utf-8"),
