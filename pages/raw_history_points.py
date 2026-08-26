@@ -150,7 +150,7 @@ def build_url(uid, page_num, size, sort_field, sort_dir, campo_fecha=None, cutof
         params.append(f"sort={prefix}{sort_field}")
     if campo_fecha and cutoff_dt:
         iso_cutoff = cutoff_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-        params.append(f"range[{campo_fecha}]={iso_cutoff},")
+        params.append(f"range[{campo_fecha}]={iso_cutoff},2099-12-31T23:59:59Z")
     return base + "?" + "&".join(params)
 
 # ── Fetch ─────────────────────────────────────────────────────────────────────
