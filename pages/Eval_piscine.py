@@ -1,23 +1,23 @@
 import streamlit as st
 import requests
 import time
-import json
+import pandas as pd
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 MADRID_TZ = ZoneInfo("Europe/Madrid")
 
-def parse_api_datetime(value):
-    """Convierte un string ISO de la API (con 'Z') a datetime timezone-aware en UTC. None si no parsea."""
-    if not value:
-        return None
-    try:
-        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    except Exception:
-        return None
+POOL_REASONS = {
+    "Provided points to the pool.",
+    "Provided points to the pool",
+}
+ROBIN_HOOD_REASONS = {
+    "Roobin Hood",
+    "Robin Hood",
+}
 
 # ── Page config ───────────────────────────────────────────────────────────────
-st.set_page_config(page_title="42 Raw — Correction Point Historics", page_icon="🔍", layout="wide")
+st.set_page_config(page_title="42 Eval Piscine — Pool & Robin Hood", page_icon="🏊", layout="wide")
 
 st.markdown("""
 <style>
@@ -37,10 +37,10 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<div class="page-title">🔍 Raw — Correction Point Historics</div>', unsafe_allow_html=True)
-st.markdown('<div class="page-sub">GET /v2/users/:user_id/correction_point_historics — para inspeccionar el JSON tal cual lo devuelve la API</div>', unsafe_allow_html=True)
+st.markdown('<div class="page-title">🏊 Eval Piscine — Pool & Robin Hood</div>', unsafe_allow_html=True)
+st.markdown('<div class="page-sub">Escanea los usuarios de la piscine, descarga su historial de puntos de evaluación, y filtra los puntos perdidos (pool y Robin Hood)</div>', unsafe_allow_html=True)
 
-# ── Auth (idéntico a tu app) ───────────────────────────────────────────────────
+# ── Auth ──────────────────────────────────────────────────────────────────────
 def get_token():
     try:
         cid  = st.secrets["api42"]["client_id"]
@@ -70,11 +70,6 @@ def get_headers(force=False):
     return st.session_state["api_headers"]
 
 def api_get(url, headers, max_retries=3, timeout=30):
-    """
-    GET con reintentos ante timeout/errores de conexión (backoff 2,4,8s).
-    Si el token caducó (401), lo renueva y reintenta.
-    Devuelve None si se agotan los reintentos, en vez de lanzar la excepción.
-    """
     for attempt in range(max_retries):
         try:
             resp = requests.get(url, headers=headers, timeout=timeout)
@@ -106,210 +101,238 @@ if not headers:
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("### 🔍 Query settings")
+    st.markdown("### 🏊 Scan settings")
 
-    user_id_or_login = st.text_input("User ID o login", value="", placeholder="ej: 12345 o jdoe")
+    campus_id   = st.session_state.get("campus_id", 46)
+    campus_name = st.session_state.get("selected_campus", "Barcelona")
+    scope = st.radio("Alcance", ["Solo este campus", "Todos los campus"], index=0)
+    st.info(f"📍 **{campus_name}** (ID {campus_id})" if scope == "Solo este campus" else "🌍 Todos los campus")
 
-    sort_field = st.selectbox(
-        "Sort",
-        ["(sin ordenar)", "id", "user_id", "scale_team_id", "reason", "sum", "created_at", "updated_at", "total"],
-        index=0,
-    )
-    sort_dir = st.radio("Dirección", ["asc", "desc"], horizontal=True, index=0)
+    cursus_id = st.number_input("Cursus ID (piscine)", value=9, min_value=1, help="9 = Piscine Common Core")
+    max_pages = st.number_input("Páginas máx (100/pág)", 1, 1000, 40)
+    debug     = st.checkbox("🐛 Debug (mostrar URLs)", value=False)
 
-    page_number = st.number_input("page[number]", min_value=1, value=1)
-    page_size   = st.number_input("page[size]", min_value=1, max_value=100, value=30)
+    scan_btn = st.button("🚀 Escanear piscine + historial", type="primary", use_container_width=True)
 
-    st.markdown("---")
-    fetch_all = st.checkbox("Traer todas las páginas y concatenar", value=False)
-    max_pages = st.number_input("Páginas máx (si 'traer todas')", 1, 200, 20, disabled=not fetch_all)
+# ── Scan: get piscine users + their correction_point_historics ────────────────
+def fetch_correction_history(user_id, headers, max_pages_hist=20):
+    all_records = []
+    page = 1
+    while page <= max_pages_hist:
+        url = f"https://api.intra.42.fr/v2/users/{user_id}/correction_point_historics?page[number]={page}&page[size]=100&sort=-created_at"
+        resp = api_get(url, headers)
+        if resp is None:
+            break
+        if resp.status_code == 429:
+            wait = int(resp.headers.get("Retry-After", 5))
+            time.sleep(wait)
+            continue
+        if resp.status_code != 200:
+            break
+        data = resp.json()
+        if not data:
+            break
+        all_records.extend(data)
+        if len(data) < 100:
+            break
+        page += 1
+    return all_records
 
-    debug = st.checkbox("🐛 Mostrar URL exacta", value=True)
+def scan_piscine(campus_id, scope, cursus_id, headers, max_pages, debug):
+    users = []
+    total = 0
+    page  = 1
+    base  = f"https://api.intra.42.fr/v2/cursus/{cursus_id}/cursus_users"
 
-    st.markdown("---")
-    st.markdown("**Orden y filtro por fecha (aplicado en el cliente)**")
-    campo_fecha = st.selectbox("Campo de fecha", ["updated_at", "created_at"], index=0)
-    invertir = st.checkbox("🔄 Últimas modificaciones primero", value=True)
+    bar    = st.progress(0, text="Escaneando piscine...")
+    status = st.empty()
 
-    filtrar_fecha = st.checkbox("📅 Filtrar: solo posteriores a...", value=True)
-    col_f, col_h = st.columns(2)
-    with col_f:
-        cutoff_date = st.date_input("Fecha", value=datetime(2026, 8, 26).date(), format="DD/MM/YYYY", disabled=not filtrar_fecha)
-    with col_h:
-        cutoff_time = st.time_input("Hora", value=datetime(2026, 8, 26, 15, 20).time(), disabled=not filtrar_fecha)
-    st.caption("Hora local Europe/Madrid")
+    while page <= max_pages:
+        if scope == "Solo este campus":
+            url = f"{base}?filter[campus_id]={campus_id}&page[size]=100&page[number]={page}&sort=-updated_at"
+        else:
+            url = f"{base}?page[size]=100&page[number]={page}&sort=-updated_at"
 
-    fetch_btn = st.button("🚀 Fetch raw", type="primary", use_container_width=True)
-
-# ── Build URL ─────────────────────────────────────────────────────────────────
-def build_url(uid, page_num, size, sort_field, sort_dir, campo_fecha=None, cutoff_dt=None):
-    base = f"https://api.intra.42.fr/v2/users/{uid}/correction_point_historics"
-    params = [f"page[number]={page_num}", f"page[size]={size}"]
-    if sort_field != "(sin ordenar)":
-        prefix = "-" if sort_dir == "desc" else ""
-        params.append(f"sort={prefix}{sort_field}")
-    if campo_fecha and cutoff_dt:
-        iso_cutoff = cutoff_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-        params.append(f"range[{campo_fecha}]={iso_cutoff},2099-12-31T23:59:59Z")
-    return base + "?" + "&".join(params)
-
-# ── Fetch ─────────────────────────────────────────────────────────────────────
-if fetch_btn:
-    if not user_id_or_login.strip():
-        st.warning("⚠️ Introduce un user_id o login primero.")
-        st.stop()
-
-    uid = user_id_or_login.strip()
-
-    # Calcular cutoff_dt para server-side range filter
-    cutoff_dt = None
-    if filtrar_fecha:
-        cutoff_naive = datetime.combine(cutoff_date, cutoff_time)
-        cutoff_dt = cutoff_naive.replace(tzinfo=MADRID_TZ).astimezone(timezone.utc)
-
-    if not fetch_all:
-        url = build_url(uid, page_number, page_size, sort_field, sort_dir, campo_fecha if filtrar_fecha else None, cutoff_dt)
         if debug:
             st.code(url)
 
         resp = api_get(url, headers)
 
-        if resp is None:
-            st.error("❌ Timeout / error de red persistente. Inténtalo de nuevo.")
-            st.stop()
+        if resp.status_code == 429:
+            wait = int(resp.headers.get("Retry-After", 5))
+            status.warning(f"⏳ Rate limit — esperando {wait}s...")
+            time.sleep(wait)
+            continue
 
-        st.session_state["raw_status_code"] = resp.status_code
-        st.session_state["raw_headers"]     = dict(resp.headers)
-        st.session_state["raw_url"]         = url
+        if resp.status_code != 200:
+            status.error(f"❌ Error API {resp.status_code}: {resp.text[:200]}")
+            break
 
-        if resp.status_code == 200:
-            try:
-                st.session_state["raw_data"] = resp.json()
-            except Exception:
-                st.session_state["raw_data"] = None
-                st.session_state["raw_text"] = resp.text
-        else:
-            st.session_state["raw_data"] = None
-            st.session_state["raw_text"] = resp.text
+        data = resp.json()
+        if not data:
+            break
 
-    else:
-        all_data = []
-        page = 1
-        bar    = st.progress(0, text="Escaneando páginas…")
-        status = st.empty()
-        last_status_code = None
-        last_url = None
-        last_headers = None
-
-        while page <= max_pages:
-            url = build_url(uid, page, page_size, sort_field, sort_dir, campo_fecha if filtrar_fecha else None, cutoff_dt)
-            last_url = url
-            if debug:
-                st.code(url)
-
-            resp = api_get(url, headers)
-
-            if resp is None:
-                status.error(f"❌ Timeout persistente en página {page}. Deteniendo con {len(all_data)} registros recogidos.")
-                break
-
-            last_status_code = resp.status_code
-            last_headers = dict(resp.headers)
-
-            if resp.status_code == 429:
-                wait = int(resp.headers.get("Retry-After", 5))
-                status.warning(f"⏳ Rate limit — esperando {wait}s…")
-                time.sleep(wait)
+        for cu in data:
+            user = cu.get("user") or {}
+            if not user:
                 continue
+            total += 1
+            uid = user.get("id")
+            if uid:
+                users.append({
+                    "user_id":     uid,
+                    "Login":       user.get("login", ""),
+                    "Display Name": user.get("displayname", ""),
+                    "Kind":        user.get("kind", ""),
+                    "Level":       round(float(cu.get("level", 0)), 2),
+                    "Eval Points": int(user.get("correction_point", 0) or 0),
+                })
 
-            if resp.status_code != 200:
-                status.error(f"❌ Error API {resp.status_code}: {resp.text[:300]}")
-                break
+        status.text(f"Pagina {page} · {total} usuarios escaneados")
+        bar.progress(min(page / max_pages, 1.0), text=f"Pagina {page}/{max_pages} · {total} usuarios")
 
-            data = resp.json()
-            if not data:
-                break
+        if len(data) < 100:
+            break
+        page += 1
 
-            all_data.extend(data)
-            status.text(f"📄 Página {page} · {len(all_data)} registros acumulados")
-            bar.progress(min(page / max_pages, 1.0), text=f"Página {page}/{max_pages}")
+    bar.empty()
+    status.empty()
+    return users
 
-            if len(data) < page_size:
-                break
-            page += 1
+# ── Run scan ────────────────────────────────────────────────────────────────
+if scan_btn:
+    users = scan_piscine(campus_id, scope, cursus_id, headers, max_pages, debug)
+    st.session_state["piscine_users"] = users
+    st.session_state["scan_ts"] = datetime.now().strftime("%H:%M:%S")
 
-        bar.empty()
-        status.empty()
+    if users:
+        bar2 = st.progress(0, text="Descargando historiales de puntos...")
+        status2 = st.empty()
+        all_pool_records = []
+        all_robin_records = []
+        all_user_records = {}
+        processed = 0
 
-        st.session_state["raw_status_code"] = last_status_code
-        st.session_state["raw_headers"]     = last_headers
-        st.session_state["raw_url"]         = last_url
-        st.session_state["raw_data"]        = all_data
-        st.session_state.pop("raw_text", None)
+        for u in users:
+            uid = u["user_id"]
+            records = fetch_correction_history(uid, headers)
+            processed += 1
+
+            user_pool = []
+            user_robin = []
+            for r in records:
+                reason = (r.get("reason") or "").strip()
+                if reason in POOL_REASONS:
+                    user_pool.append(r)
+                elif reason in ROBIN_HOOD_REASONS:
+                    user_robin.append(r)
+
+            all_user_records[uid] = {
+                "login": u["Login"],
+                "pool_records": user_pool,
+                "robin_records": user_robin,
+                "pool_sum": sum(r.get("sum", 0) for r in user_pool),
+                "robin_sum": sum(r.get("sum", 0) for r in user_robin),
+                "total_lost": sum(r.get("sum", 0) for r in user_pool) + sum(r.get("sum", 0) for r in user_robin),
+            }
+            all_pool_records.extend(user_pool)
+            all_robin_records.extend(user_robin)
+
+            bar2.progress(min(processed / len(users), 1.0), text=f"Historial {processed}/{len(users)} usuarios")
+            status2.text(f"{u['Login']} — pool: {len(user_pool)} | robin: {len(user_robin)}")
+
+        bar2.empty()
+        status2.empty()
+
+        st.session_state["piscine_history"] = all_user_records
+        st.session_state["all_pool_records"] = all_pool_records
+        st.session_state["all_robin_records"] = all_robin_records
+        st.success(f"✅ Listo — {len(users)} usuarios · {len(all_pool_records)} registros pool · {len(all_robin_records)} registros Robin Hood")
+    else:
+        st.warning("No se encontraron usuarios en la piscine.")
 
 # ── Guard ─────────────────────────────────────────────────────────────────────
-if "raw_status_code" not in st.session_state:
-    st.info("👆 Introduce un user_id/login y pulsa **Fetch raw** en el sidebar.")
+if "piscine_users" not in st.session_state:
+    st.info("👆 Pulsa **Escanear piscine + historial** en el sidebar para empezar.")
     st.stop()
 
-# ── Display ───────────────────────────────────────────────────────────────────
-status_code = st.session_state.get("raw_status_code")
-resp_headers = st.session_state.get("raw_headers", {})
-url_used = st.session_state.get("raw_url", "")
+users_list    = st.session_state["piscine_users"]
+history_data  = st.session_state.get("piscine_history", {})
+pool_records  = st.session_state.get("all_pool_records", [])
+robin_records = st.session_state.get("all_robin_records", [])
+ts = st.session_state.get("scan_ts", "—")
+
+st.markdown(f"<small style='color:var(--muted)'>Ultimo escaneo: {ts} · {len(users_list)} usuarios</small>", unsafe_allow_html=True)
+
+# ── Summary stat cards ───────────────────────────────────────────────────────
+total_pool_sum  = sum(r.get("sum", 0) for r in pool_records)
+total_robin_sum = sum(r.get("sum", 0) for r in robin_records)
+total_lost      = total_pool_sum + total_robin_sum
+n_users_with_lost = sum(1 for v in history_data.values() if v["total_lost"] < 0)
 
 c1, c2, c3, c4 = st.columns(4)
-c1.markdown(f'<div class="stat-card"><div class="stat-val" style="color:{"var(--green)" if status_code == 200 else "var(--red)"}">{status_code}</div><div class="stat-lbl">STATUS CODE</div></div>', unsafe_allow_html=True)
-
-raw_data = st.session_state.get("raw_data")
-n_items = len(raw_data) if isinstance(raw_data, list) else (1 if raw_data else 0)
-c2.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--accent)">{n_items}</div><div class="stat-lbl">REGISTROS</div></div>', unsafe_allow_html=True)
-
-total_field = resp_headers.get("X-Total", "—")
-c3.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--orange)">{total_field}</div><div class="stat-lbl">X-TOTAL (header)</div></div>', unsafe_allow_html=True)
-
-pages_field = resp_headers.get("X-Page", "—")
-c4.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--purple)">{pages_field}</div><div class="stat-lbl">X-PAGE (header)</div></div>', unsafe_allow_html=True)
+c1.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--red)">{total_lost}</div><div class="stat-lbl">PUNTOS PERDIDOS TOTALES</div></div>', unsafe_allow_html=True)
+c2.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--orange)">{total_pool_sum}</div><div class="stat-lbl">POOL (trabajo en equipo)</div></div>', unsafe_allow_html=True)
+c3.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--purple)">{total_robin_sum}</div><div class="stat-lbl">ROBIN HOOD</div></div>', unsafe_allow_html=True)
+c4.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--accent)">{n_users_with_lost}</div><div class="stat-lbl">USUARIOS CON PUNTOS PERDIDOS</div></div>', unsafe_allow_html=True)
 
 st.markdown("---")
 
-if url_used:
-    st.markdown('<div class="section-title">🔗 URL USADA</div>', unsafe_allow_html=True)
-    st.code(url_used)
+# ── Table: per-user summary ──────────────────────────────────────────────────
+st.markdown(f'<div class="section-title">📋 RESUMEN POR USUARIO</div>', unsafe_allow_html=True)
 
-st.markdown('<div class="section-title">📋 RESPONSE HEADERS</div>', unsafe_allow_html=True)
-with st.expander("Ver headers completos"):
-    st.json(resp_headers)
+user_summary = []
+for uid, v in history_data.items():
+    user_summary.append({
+        "Login": v["login"],
+        "Pool (puntos)": v["pool_sum"],
+        "Pool (registros)": len(v["pool_records"]),
+        "Robin Hood (puntos)": v["robin_sum"],
+        "Robin Hood (registros)": len(v["robin_records"]),
+        "Total perdidos": v["total_lost"],
+    })
 
-if raw_data is not None and isinstance(raw_data, list):
-
-    # ── Ordenar por el valor real del campo de fecha elegido (client-side) ────
-    raw_data_ordenado = sorted(
-        raw_data,
-        key=lambda d: parse_api_datetime(d.get(campo_fecha)) or datetime.min.replace(tzinfo=timezone.utc),
-        reverse=invertir,
-    )
-
-    orden_label = "más recientes primero" if invertir else "más antiguos primero"
-    filtro_label = f" · range[{campo_fecha}] >= {cutoff_date.strftime('%d/%m/%Y')} {cutoff_time.strftime('%H:%M')} (Madrid)" if filtrar_fecha else ""
-    st.markdown(f'<div class="section-title">🧾 RAW JSON — ordenado por {campo_fecha}, {orden_label}{filtro_label}</div>', unsafe_allow_html=True)
-
-    if filtrar_fecha:
-        cutoff_naive = datetime.combine(cutoff_date, cutoff_time)
-        cutoff_dt_display = cutoff_naive.replace(tzinfo=MADRID_TZ).astimezone(timezone.utc)
-        st.caption(f"Filtro server-side: range[{campo_fecha}] >= {cutoff_dt_display.strftime('%Y-%m-%dT%H:%M:%SZ')} — {len(raw_data_ordenado)} registros devueltos")
-
-    st.json(raw_data_ordenado)
-
-    raw_json_str = json.dumps(raw_data_ordenado, indent=2, ensure_ascii=False)
-    st.download_button(
-        "⬇️ Descargar raw JSON",
-        raw_json_str.encode("utf-8"),
-        "correction_point_historics_raw.json",
-        "application/json",
-    )
-elif raw_data is not None:
-    st.markdown('<div class="section-title">🧾 RAW JSON</div>', unsafe_allow_html=True)
-    st.json(raw_data)
+df_summary = pd.DataFrame(user_summary)
+if not df_summary.empty:
+    df_summary = df_summary.sort_values("Total perdidos")
+    st.dataframe(df_summary, use_container_width=True, hide_index=True)
+    csv = df_summary.to_csv(index=False).encode("utf-8")
+    st.download_button("⬇️ Exportar CSV (resumen usuarios)", csv, "eval_piscine_resumen.csv", "text/csv")
 else:
-    st.markdown('<div class="section-title">⚠️ RESPUESTA NO-JSON / ERROR</div>', unsafe_allow_html=True)
-    st.code(st.session_state.get("raw_text", "(sin contenido)"))
+    st.info("No hay datos de puntos perdidos.")
+
+st.markdown("---")
+
+# ── Pool details ─────────────────────────────────────────────────────────────
+st.markdown(f'<div class="section-title">🏊 POOL — "Provided points to the pool." ({len(pool_records)} registros)</div>', unsafe_allow_html=True)
+if pool_records:
+    df_pool = pd.DataFrame([{
+        "Login": history_data.get(r.get("user_id"), {}).get("login", str(r.get("user_id", ""))),
+        "Sum": r.get("sum", 0),
+        "Total": r.get("total", 0),
+        "Reason": r.get("reason", ""),
+        "Created At": r.get("created_at", ""),
+    } for r in pool_records])
+    st.dataframe(df_pool, use_container_width=True, hide_index=True)
+    csv_pool = df_pool.to_csv(index=False).encode("utf-8")
+    st.download_button("⬇️ Exportar CSV (pool)", csv_pool, "eval_piscine_pool.csv", "text/csv")
+else:
+    st.info("No hay registros de pool.")
+
+st.markdown("---")
+
+# ── Robin Hood details ───────────────────────────────────────────────────────
+st.markdown(f'<div class="section-title">🏹 ROBIN HOOD ({len(robin_records)} registros)</div>', unsafe_allow_html=True)
+if robin_records:
+    df_robin = pd.DataFrame([{
+        "Login": history_data.get(r.get("user_id"), {}).get("login", str(r.get("user_id", ""))),
+        "Sum": r.get("sum", 0),
+        "Total": r.get("total", 0),
+        "Reason": r.get("reason", ""),
+        "Created At": r.get("created_at", ""),
+    } for r in robin_records])
+    st.dataframe(df_robin, use_container_width=True, hide_index=True)
+    csv_robin = df_robin.to_csv(index=False).encode("utf-8")
+    st.download_button("⬇️ Exportar CSV (Robin Hood)", csv_robin, "eval_piscine_robin_hood.csv", "text/csv")
+else:
+    st.info("No hay registros de Robin Hood.")
