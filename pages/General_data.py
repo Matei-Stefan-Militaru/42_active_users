@@ -4,96 +4,6 @@ import time
 import pandas as pd
 from datetime import datetime, timezone
 
-_base_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
-try:
-    os.makedirs(_base_dir, exist_ok=True)
-    DB_PATH = os.path.join(_base_dir, "general_data.db")
-    # Test write access
-    sqlite3.connect(DB_PATH).close()
-except (OSError, sqlite3.OperationalError):
-    DB_PATH = os.path.join("/tmp", "general_data.db")
-
-def init_db():
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS scan_results (
-            id INTEGER PRIMARY KEY,
-            campus_id INTEGER,
-            cursus_id INTEGER,
-            scope TEXT,
-            login TEXT,
-            display_name TEXT,
-            kind TEXT,
-            grade_raw TEXT,
-            estado_cursus TEXT,
-            begin_at TEXT,
-            dias_para_empezar INTEGER,
-            level REAL,
-            eval_points INTEGER,
-            blackholed_at TEXT,
-            blackholeado INTEGER,
-            en_riesgo_bh INTEGER,
-            updated TEXT,
-            scanned_at TEXT
-        )
-    """)
-    conn.commit()
-    conn.close()
-
-def save_to_db(rows, campus_id, cursus_id, scope):
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("DELETE FROM scan_results")
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    for r in rows:
-        conn.execute("""
-            INSERT INTO scan_results (
-                campus_id, cursus_id, scope, login, display_name, kind,
-                grade_raw, estado_cursus, begin_at, dias_para_empezar,
-                level, eval_points, blackholed_at, blackholeado, en_riesgo_bh,
-                updated, scanned_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-        """, (
-            campus_id, cursus_id, scope,
-            r.get("Login", ""), r.get("Display Name", ""), r.get("Kind", ""),
-            r.get("Grade (raw)", ""), r.get("Estado cursus", ""), r.get("Begin At", ""),
-            r.get("Días para empezar"), r.get("Level", 0), r.get("Eval Points", 0),
-            r.get("Blackholed At", ""), int(r.get("Blackholeado", False)),
-            int(r.get("En Riesgo BH", False)), r.get("Updated", ""), now
-        ))
-    conn.commit()
-    conn.close()
-
-def load_from_db():
-    if not os.path.exists(DB_PATH):
-        return None
-    conn = sqlite3.connect(DB_PATH)
-    df = pd.read_sql_query("SELECT * FROM scan_results", conn)
-    conn.close()
-    if df.empty:
-        return None
-    scanned_at = df["scanned_at"].iloc[0]
-    rows = []
-    for _, row in df.iterrows():
-        rows.append({
-            "Login": row["login"],
-            "Display Name": row["display_name"],
-            "Kind": row["kind"],
-            "Grade (raw)": row["grade_raw"],
-            "Estado cursus": row["estado_cursus"],
-            "Begin At": row["begin_at"],
-            "Días para empezar": row["dias_para_empezar"],
-            "Level": row["level"],
-            "Eval Points": row["eval_points"],
-            "Blackholed At": row["blackholed_at"],
-            "Blackholeado": bool(row["blackholeado"]),
-            "En Riesgo BH": bool(row["en_riesgo_bh"]),
-            "Updated": row["updated"],
-        })
-    return rows, scanned_at
-
-init_db()
-
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(page_title="42 Cursus Activo / Pendiente", page_icon="📅", layout="wide")
 
@@ -284,15 +194,8 @@ if scan_btn:
 
 # ── Guard ─────────────────────────────────────────────────────────────────────
 if "cursus_status_rows" not in st.session_state:
-    db_data = load_from_db()
-    if db_data:
-        rows, scanned_at = db_data
-        st.session_state["cursus_status_rows"] = rows
-        st.session_state["scan_ts"] = scanned_at
-        st.info(f"📂 Datos cargados desde BD (escaneo: {scanned_at})")
-    else:
-        st.info("👆 Pulsa **Ver activo / pendiente** en el sidebar para empezar.")
-        st.stop()
+    st.info("👆 Pulsa **Ver activo / pendiente** en el sidebar para empezar.")
+    st.stop()
 
 rows = st.session_state["cursus_status_rows"]
 ts = st.session_state.get("scan_ts", "—")
