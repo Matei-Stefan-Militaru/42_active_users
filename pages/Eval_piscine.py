@@ -3,6 +3,9 @@ import requests
 import time
 import pandas as pd
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+
+MADRID_TZ = ZoneInfo("Europe/Madrid")
 
 POOL_REASONS = {
     "Provided points to the pool.",
@@ -97,11 +100,14 @@ if not headers:
     st.stop()
 
 # ── Fetch correction point history ────────────────────────────────────────────
-def fetch_correction_history(login, headers, max_pages=20):
+def fetch_correction_history(login, headers, since_dt=None, max_pages=20):
     all_records = []
     page = 1
     while page <= max_pages:
         url = f"https://api.intra.42.fr/v2/users/{login}/correction_point_historics?page[number]={page}&page[size]=100&sort=-created_at"
+        if since_dt:
+            iso = since_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+            url += f"&range[created_at]={iso},2099-12-31T23:59:59Z"
         resp = api_get(url, headers)
         if resp is None:
             break
@@ -124,6 +130,18 @@ def fetch_correction_history(login, headers, max_pages=20):
 with st.sidebar:
     st.markdown("### 🏊 Settings")
     debug = st.checkbox("🐛 Debug", value=False)
+
+    st.markdown("---")
+    filtrar_fecha = st.checkbox("📅 Filtrar por fecha", value=True)
+    col_f, col_h = st.columns(2)
+    with col_f:
+        cutoff_date = st.date_input("Fecha desde", value=datetime(2026, 8, 10).date(), format="DD/MM/YYYY", disabled=not filtrar_fecha)
+    with col_h:
+        cutoff_time = st.time_input("Hora", value=datetime(2026, 8, 10, 0, 0).time(), disabled=not filtrar_fecha)
+    st.caption("Hora local Europe/Madrid")
+
+    max_pages = st.number_input("Páginas máx (100/pág)", 1, 20, 5, help="Máximo de páginas por usuario")
+
     scan_btn = st.button("🚀 Descargar historiales", type="primary", use_container_width=True)
 
 # ── Check session ─────────────────────────────────────────────────────────────
@@ -148,18 +166,25 @@ st.markdown(f"<small style='color:var(--muted)'>General Data: {len(users_blackho
 
 # ── Run ───────────────────────────────────────────────────────────────────────
 if scan_btn:
+    since_dt = None
+    if filtrar_fecha:
+        cutoff_naive = datetime.combine(cutoff_date, cutoff_time)
+        since_dt = cutoff_naive.replace(tzinfo=MADRID_TZ).astimezone(timezone.utc)
+
     all_user_records = {}
     all_pool_records = []
     all_robin_records = []
     processed = 0
+    total_calls = 0
 
     bar = st.progress(0, text="Descargando historiales...")
     status = st.empty()
 
     for u in users_valid:
         login = u["Login"]
-        records = fetch_correction_history(login, headers)
+        records = fetch_correction_history(login, headers, since_dt=since_dt, max_pages=max_pages)
         processed += 1
+        total_calls += 1
 
         user_pool = []
         user_robin = []
