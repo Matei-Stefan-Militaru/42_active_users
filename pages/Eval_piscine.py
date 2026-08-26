@@ -133,9 +133,18 @@ if not users_from_session:
     st.stop()
 
 ALLOWED_GRADES = {"Cadet", "Transcender", "Alumni"}
-users_from_session = [u for u in users_from_session if u.get("Grade") in ALLOWED_GRADES]
 
-st.markdown(f"<small style='color:var(--muted)'>Usuarios de General Data (Cadet/Transcender/Alumni): {len(users_from_session)}</small>", unsafe_allow_html=True)
+users_blackhole = [u for u in users_from_session if u.get("Blackholeado")]
+users_valid     = [u for u in users_from_session if u.get("Grade") in ALLOWED_GRADES and not u.get("Blackholeado")]
+users_others    = [u for u in users_from_session if u.get("Grade") not in ALLOWED_GRADES and not u.get("Blackholeado")]
+
+all_groups = [
+    ("🕳️ BLACKHOLEADOS", users_blackhole),
+    ("🎓 CADET / TRANSCENDER / ALUMNI", users_valid),
+    ("👥 RESTO", users_others),
+]
+
+st.markdown(f"<small style='color:var(--muted)'>General Data: {len(users_blackhole)} blackholeados · {len(users_valid)} Cadet/Transcender/Alumni · {len(users_others)} resto</small>", unsafe_allow_html=True)
 
 # ── Run ───────────────────────────────────────────────────────────────────────
 if scan_btn:
@@ -147,7 +156,7 @@ if scan_btn:
     bar = st.progress(0, text="Descargando historiales...")
     status = st.empty()
 
-    for u in users_from_session:
+    for u in users_valid:
         login = u["Login"]
         records = fetch_correction_history(login, headers)
         processed += 1
@@ -162,6 +171,8 @@ if scan_btn:
                 user_robin.append(r)
 
         all_user_records[login] = {
+            "Grade": u.get("Grade", ""),
+            "Blackholeado": u.get("Blackholeado", False),
             "pool_records": user_pool,
             "robin_records": user_robin,
             "pool_sum": sum(r.get("sum", 0) for r in user_pool),
@@ -171,7 +182,7 @@ if scan_btn:
         all_pool_records.extend(user_pool)
         all_robin_records.extend(user_robin)
 
-        bar.progress(min(processed / len(users_from_session), 1.0), text=f"Historial {processed}/{len(users_from_session)}")
+        bar.progress(min(processed / len(users_valid), 1.0), text=f"Historial {processed}/{len(users_valid)}")
         status.text(f"{login} — pool: {len(user_pool)} | robin: {len(user_robin)}")
 
     bar.empty()
@@ -181,7 +192,7 @@ if scan_btn:
     st.session_state["eval_pool_records"] = all_pool_records
     st.session_state["eval_robin_records"] = all_robin_records
     st.session_state["eval_ts"] = datetime.now().strftime("%H:%M:%S")
-    st.success(f"✅ Listo — {len(users_from_session)} usuarios · {len(all_pool_records)} pool · {len(all_robin_records)} Robin Hood")
+    st.success(f"✅ Listo — {len(users_valid)} usuarios · {len(all_pool_records)} pool · {len(all_robin_records)} Robin Hood")
 
 # ── Guard ─────────────────────────────────────────────────────────────────────
 if "eval_history" not in st.session_state:
@@ -209,30 +220,42 @@ c4.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--ac
 
 st.markdown("---")
 
-# ── Table: per-user summary ──────────────────────────────────────────────────
-st.markdown(f'<div class="section-title">📋 RESUMEN POR USUARIO</div>', unsafe_allow_html=True)
+# ── Helper: build summary DataFrame for a group of logins ────────────────────
+def build_group_df(logins, history):
+    rows = []
+    for login in logins:
+        v = history.get(login)
+        if not v:
+            continue
+        rows.append({
+            "Login": login,
+            "Grade": v.get("Grade", ""),
+            "Pool (puntos)": v["pool_sum"],
+            "Pool (registros)": len(v["pool_records"]),
+            "Robin Hood (puntos)": v["robin_sum"],
+            "Robin Hood (registros)": len(v["robin_records"]),
+            "Total perdidos": v["total_lost"],
+        })
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        df = df.sort_values("Total perdidos")
+    return df
 
-user_summary = []
-for login, v in history_data.items():
-    user_summary.append({
-        "Login": login,
-        "Pool (puntos)": v["pool_sum"],
-        "Pool (registros)": len(v["pool_records"]),
-        "Robin Hood (puntos)": v["robin_sum"],
-        "Robin Hood (registros)": len(v["robin_records"]),
-        "Total perdidos": v["total_lost"],
-    })
+# ── Display each group ──────────────────────────────────────────────────────
+group_logins = {
+    "🎓 CADET / TRANSCENDER / ALUMNI": [u["Login"] for u in users_valid],
+}
 
-df_summary = pd.DataFrame(user_summary)
-if not df_summary.empty:
-    df_summary = df_summary.sort_values("Total perdidos")
-    st.dataframe(df_summary, use_container_width=True, hide_index=True)
-    csv = df_summary.to_csv(index=False).encode("utf-8")
-    st.download_button("⬇️ Exportar CSV (resumen)", csv, "eval_piscine_resumen.csv", "text/csv")
-else:
-    st.info("No hay datos de puntos perdidos.")
-
-st.markdown("---")
+for group_name, logins in group_logins.items():
+    df_group = build_group_df(logins, history_data)
+    st.markdown(f'<div class="section-title">{group_name} — {len(df_group)} usuarios</div>', unsafe_allow_html=True)
+    if not df_group.empty:
+        st.dataframe(df_group, use_container_width=True, hide_index=True)
+        csv = df_group.to_csv(index=False).encode("utf-8")
+        st.download_button(f"⬇️ CSV ({group_name})", csv, f"eval_piscine_cadet_transcender_alumni.csv", "text/csv", key=f"dl_{group_name}")
+    else:
+        st.info(f"No hay datos para {group_name}.")
+    st.markdown("---")
 
 # ── Pool details ─────────────────────────────────────────────────────────────
 st.markdown(f'<div class="section-title">🏊 POOL — "Provided points to the pool." ({len(pool_records)} registros)</div>', unsafe_allow_html=True)

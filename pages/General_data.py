@@ -279,7 +279,7 @@ if scan_btn:
     st.session_state["cursus_status_rows"] = rows
     st.session_state["scan_ts"] = datetime.now().strftime("%H:%M:%S")
     st.session_state["general_data_users"] = [
-        {"Login": r["Login"], "Display Name": r["Display Name"], "Grade": r["Grade (raw)"], "Eval Points": r["Eval Points"]}
+        {"Login": r["Login"], "Display Name": r["Display Name"], "Grade": r["Grade (raw)"], "Blackholeado": r["Blackholeado"], "Eval Points": r["Eval Points"]}
         for r in rows
     ]
     st.success(f"✅ Escaneo completo — {len(rows)} registros guardados")
