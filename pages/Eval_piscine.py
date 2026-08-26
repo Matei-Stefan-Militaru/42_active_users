@@ -163,20 +163,13 @@ with st.sidebar:
                 st.session_state["eval_robin_records"] = data["robin_records"]
             if "defense_records" in data:
                 st.session_state["eval_defense_records"] = data["defense_records"]
-            if "eval_export" in data:
-                st.session_state["eval_export"] = data["eval_export"]
+            if "teams" in data:
+                st.session_state["eval_teams"] = data["teams"]
             if "ts" in data:
                 st.session_state["eval_ts"] = data["ts"]
-
-            defense = data.get("defense_records", st.session_state.get("eval_defense_records", []))
-            teams = defaultdict(list)
-            for entry in defense:
-                stid = entry.get("record", {}).get("scale_team_id")
-                if stid:
-                    teams[stid].append(entry)
-            st.session_state["eval_teams"] = dict(teams)
-
-            st.success(f"✅ Cargado: eval data restaurada ({len(teams)} teams)")
+            if "eval_export" in data:
+                st.session_state["eval_export"] = data["eval_export"]
+            st.success(f"✅ Cargado: eval data restaurada")
             st.rerun()
         except Exception as e:
             st.error(f"Error al cargar: {e}")
