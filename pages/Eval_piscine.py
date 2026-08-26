@@ -291,16 +291,22 @@ if "eval_export" in st.session_state:
     st.download_button("⬇️ Descargar eval (JSON)", st.session_state["eval_export"], f"eval_piscine_{ts}.json", "application/json", key="dl_eval")
 
 # ── Summary stat cards ───────────────────────────────────────────────────────
-total_pool_sum  = sum(r.get("sum", 0) for r in pool_records)
-total_robin_sum = sum(r.get("sum", 0) for r in robin_records)
+total_pool_sum  = abs(sum(r.get("sum", 0) for r in pool_records))
+total_robin_sum = abs(sum(r.get("sum", 0) for r in robin_records))
 
 teams = st.session_state.get("eval_teams", {})
+if not teams and defense_records:
+    for entry in defense_records:
+        stid = entry["record"].get("scale_team_id")
+        if stid:
+            teams.setdefault(stid, []).append(entry)
+    st.session_state["eval_teams"] = teams
+
 total_defense_lost = 0
 for stid, members in teams.items():
-    unique_logins = {m["login"] for m in members}
-    n_members = len(unique_logins)
-    if n_members >= 2:
-        total_defense_lost += (n_members - 1) * 3
+    total_sum = abs(sum(m["record"].get("sum", 0) for m in members))
+    if total_sum >= 2:
+        total_defense_lost += total_sum - 1
 
 total_lost = total_pool_sum + total_robin_sum + total_defense_lost
 n_users_with_lost = sum(1 for v in history_data.values() if v["total_lost"] < 0)
@@ -390,6 +396,12 @@ st.markdown("---")
 # ── Team detection (Defense Plannification) ───────────────────────────────────
 defense_records = st.session_state.get("eval_defense_records", [])
 teams = st.session_state.get("eval_teams", {})
+if not teams and defense_records:
+    for entry in defense_records:
+        stid = entry["record"].get("scale_team_id")
+        if stid:
+            teams.setdefault(stid, []).append(entry)
+    st.session_state["eval_teams"] = teams
 
 st.markdown(f'<div class="section-title">🛡️ TEAMS / DEFENSE PLANNIFICATION ({len(defense_records)} registros · {len(teams)} teams)</div>', unsafe_allow_html=True)
 
