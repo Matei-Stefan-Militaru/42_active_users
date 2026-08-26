@@ -2,6 +2,7 @@ import streamlit as st
 import requests
 import time
 import pandas as pd
+import json
 from datetime import datetime, timezone
 
 # ── Page config ───────────────────────────────────────────────────────────────
@@ -84,6 +85,20 @@ with st.sidebar:
     debug     = st.checkbox("🐛 Debug (mostrar URLs)", value=False)
 
     scan_btn = st.button("🚀 Ver activo / pendiente", type="primary", use_container_width=True)
+
+    st.markdown("---")
+    st.markdown("### 💾 Guardar / Cargar escaneo")
+    uploaded = st.file_uploader("📂 Cargar escaneo (JSON)", type=["json"], key="upload_general")
+    if uploaded:
+        try:
+            data = json.loads(uploaded.read().decode("utf-8"))
+            st.session_state["cursus_status_rows"] = data["rows"]
+            st.session_state["scan_ts"] = data.get("ts", "—")
+            st.session_state["general_data_users"] = data.get("general_data_users", [])
+            st.success(f"✅ Cargado: {len(data['rows'])} registros")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Error al cargar: {e}")
 
 # ── Scan function with progress bar ────────────────────────────────────────────
 def scan_targets(campus_id, scope, cursus_id, headers, max_pages, debug):
@@ -190,6 +205,8 @@ if scan_btn:
         {"Login": r["Login"], "Display Name": r["Display Name"], "Grade": r["Grade (raw)"], "Blackholeado": r["Blackholeado"], "Eval Points": r["Eval Points"]}
         for r in rows
     ]
+    export_data = json.dumps({"rows": rows, "ts": datetime.now().strftime("%H:%M:%S"), "general_data_users": st.session_state["general_data_users"]}, ensure_ascii=False, default=str)
+    st.session_state["general_data_export"] = export_data
     st.success(f"✅ Escaneo completo — {len(rows)} registros guardados")
 
 # ── Guard ─────────────────────────────────────────────────────────────────────
@@ -202,6 +219,9 @@ ts = st.session_state.get("scan_ts", "—")
 
 df = pd.DataFrame(rows)
 st.markdown(f"<small style='color:var(--muted)'>Último escaneo: {ts} · {len(df)} registros</small>", unsafe_allow_html=True)
+
+if "general_data_export" in st.session_state:
+    st.download_button("⬇️ Descargar escaneo (JSON)", st.session_state["general_data_export"], f"general_data_{ts}.json", "application/json", key="dl_general")
 
 # ── Stats ─────────────────────────────────────────────────────────────────────
 pendientes  = df[(df["Estado cursus"] == "🟡 Pendiente (aún no empieza)") & (~df["Blackholeado"])]

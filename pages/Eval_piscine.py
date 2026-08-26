@@ -2,6 +2,7 @@ import streamlit as st
 import requests
 import time
 import pandas as pd
+import json
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from collections import defaultdict
@@ -148,6 +149,23 @@ with st.sidebar:
 
     scan_btn = st.button("🚀 Descargar historiales", type="primary", use_container_width=True)
 
+    st.markdown("---")
+    st.markdown("### 💾 Guardar / Cargar eval")
+    uploaded = st.file_uploader("📂 Cargar eval (JSON)", type=["json"], key="upload_eval")
+    if uploaded:
+        try:
+            data = json.loads(uploaded.read().decode("utf-8"))
+            st.session_state["eval_history"] = data["history"]
+            st.session_state["eval_pool_records"] = data.get("pool_records", [])
+            st.session_state["eval_robin_records"] = data.get("robin_records", [])
+            st.session_state["eval_defense_records"] = data.get("defense_records", [])
+            st.session_state["eval_teams"] = data.get("teams", {})
+            st.session_state["eval_ts"] = data.get("ts", "—")
+            st.success(f"✅ Cargado: eval data restaurada")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Error al cargar: {e}")
+
 # ── Check session ─────────────────────────────────────────────────────────────
 users_from_session = st.session_state.get("general_data_users")
 if not users_from_session:
@@ -229,8 +247,25 @@ if scan_btn:
     st.session_state["eval_pool_records"] = all_pool_records
     st.session_state["eval_robin_records"] = all_robin_records
     st.session_state["eval_defense_records"] = all_defense_records
+
+    teams = defaultdict(list)
+    for entry in all_defense_records:
+        stid = entry["record"].get("scale_team_id")
+        if stid:
+            teams[stid].append(entry)
+    st.session_state["eval_teams"] = dict(teams)
+
     st.session_state["eval_ts"] = datetime.now().strftime("%H:%M:%S")
-    st.success(f"✅ Listo — {len(users_valid)} usuarios · {len(all_pool_records)} pool · {len(all_robin_records)} Robin Hood · {len(all_defense_records)} defense plannification")
+    export_data = json.dumps({
+        "history": all_user_records,
+        "pool_records": all_pool_records,
+        "robin_records": all_robin_records,
+        "defense_records": all_defense_records,
+        "teams": dict(teams),
+        "ts": st.session_state["eval_ts"],
+    }, ensure_ascii=False, default=str)
+    st.session_state["eval_export"] = export_data
+    st.success(f"✅ Listo — {len(users_valid)} usuarios · {len(all_pool_records)} pool · {len(all_robin_records)} Robin Hood · {len(all_defense_records)} defense plannification · {len(teams)} teams")
 
 # ── Guard ─────────────────────────────────────────────────────────────────────
 if "eval_history" not in st.session_state:
@@ -244,17 +279,30 @@ ts = st.session_state.get("eval_ts", "—")
 
 st.markdown(f"<small style='color:var(--muted)'>Ultimo escaneo: {ts}</small>", unsafe_allow_html=True)
 
+if "eval_export" in st.session_state:
+    st.download_button("⬇️ Descargar eval (JSON)", st.session_state["eval_export"], f"eval_piscine_{ts}.json", "application/json", key="dl_eval")
+
 # ── Summary stat cards ───────────────────────────────────────────────────────
 total_pool_sum  = sum(r.get("sum", 0) for r in pool_records)
 total_robin_sum = sum(r.get("sum", 0) for r in robin_records)
-total_lost      = total_pool_sum + total_robin_sum
+
+teams = st.session_state.get("eval_teams", {})
+total_defense_lost = 0
+for stid, members in teams.items():
+    unique_logins = {m["login"] for m in members}
+    n_members = len(unique_logins)
+    if n_members >= 2:
+        total_defense_lost += (n_members - 1) * 3
+
+total_lost = total_pool_sum + total_robin_sum + total_defense_lost
 n_users_with_lost = sum(1 for v in history_data.values() if v["total_lost"] < 0)
 
-c1, c2, c3, c4 = st.columns(4)
+c1, c2, c3, c4, c5 = st.columns(5)
 c1.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--red)">{total_lost}</div><div class="stat-lbl">PUNTOS PERDIDOS TOTALES</div></div>', unsafe_allow_html=True)
 c2.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--orange)">{total_pool_sum}</div><div class="stat-lbl">POOL (puntos donados)</div></div>', unsafe_allow_html=True)
 c3.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--purple)">{total_robin_sum}</div><div class="stat-lbl">ROBIN HOOD</div></div>', unsafe_allow_html=True)
-c4.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--accent)">{n_users_with_lost}</div><div class="stat-lbl">USUARIOS CON PUNTOS PERDIDOS</div></div>', unsafe_allow_html=True)
+c4.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--accent)">{total_defense_lost}</div><div class="stat-lbl">DEFENSE PLANNIFICATION</div></div>', unsafe_allow_html=True)
+c5.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--muted)">{n_users_with_lost}</div><div class="stat-lbl">USUARIOS CON PUNTOS PERDIDOS</div></div>', unsafe_allow_html=True)
 
 st.markdown("---")
 
@@ -333,16 +381,11 @@ st.markdown("---")
 
 # ── Team detection (Defense Plannification) ───────────────────────────────────
 defense_records = st.session_state.get("eval_defense_records", [])
+teams = st.session_state.get("eval_teams", {})
 
-st.markdown(f'<div class="section-title">🛡️ TEAMS / DEFENSE PLANNIFICATION ({len(defense_records)} registros)</div>', unsafe_allow_html=True)
+st.markdown(f'<div class="section-title">🛡️ TEAMS / DEFENSE PLANNIFICATION ({len(defense_records)} registros · {len(teams)} teams)</div>', unsafe_allow_html=True)
 
-if defense_records:
-    teams = defaultdict(list)
-    for entry in defense_records:
-        stid = entry["record"].get("scale_team_id")
-        if stid:
-            teams[stid].append(entry)
-
+if teams:
     team_rows = []
     for stid, members in sorted(teams.items(), key=lambda x: -abs(sum(m["record"].get("sum", 0) for m in x[1]))):
         member_logins = sorted({m["login"] for m in members})
@@ -383,4 +426,4 @@ if defense_records:
             df_member = pd.DataFrame(member_rows)
             st.dataframe(df_member, use_container_width=True, hide_index=True)
 else:
-    st.info("No hay registros de Defense plannification.")
+    st.info("No hay datos de teams. Descarga historiales primero.")
