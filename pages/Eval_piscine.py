@@ -155,12 +155,20 @@ with st.sidebar:
     if uploaded:
         try:
             data = json.loads(uploaded.read().decode("utf-8"))
-            st.session_state["eval_history"] = data["history"]
-            st.session_state["eval_pool_records"] = data.get("pool_records", [])
-            st.session_state["eval_robin_records"] = data.get("robin_records", [])
-            st.session_state["eval_defense_records"] = data.get("defense_records", [])
-            st.session_state["eval_teams"] = data.get("teams", {})
-            st.session_state["eval_ts"] = data.get("ts", "—")
+            if "history" in data:
+                st.session_state["eval_history"] = data["history"]
+            if "pool_records" in data:
+                st.session_state["eval_pool_records"] = data["pool_records"]
+            if "robin_records" in data:
+                st.session_state["eval_robin_records"] = data["robin_records"]
+            if "defense_records" in data:
+                st.session_state["eval_defense_records"] = data["defense_records"]
+            if "teams" in data:
+                st.session_state["eval_teams"] = data["teams"]
+            if "ts" in data:
+                st.session_state["eval_ts"] = data["ts"]
+            if "eval_export" in data:
+                st.session_state["eval_export"] = data["eval_export"]
             st.success(f"✅ Cargado: eval data restaurada")
             st.rerun()
         except Exception as e:
