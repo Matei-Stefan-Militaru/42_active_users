@@ -139,9 +139,9 @@ with st.sidebar:
     filtrar_fecha = st.checkbox("📅 Filtrar por fecha", value=True)
     col_f, col_h = st.columns(2)
     with col_f:
-        cutoff_date = st.date_input("Fecha desde", value=datetime(2026, 8, 10).date(), format="DD/MM/YYYY", disabled=not filtrar_fecha)
+        cutoff_date = st.date_input("Fecha desde", value=datetime(2026, 8, 26).date(), format="DD/MM/YYYY", disabled=not filtrar_fecha)
     with col_h:
-        cutoff_time = st.time_input("Hora", value=datetime(2026, 8, 10, 0, 0).time(), disabled=not filtrar_fecha)
+        cutoff_time = st.time_input("Hora", value=datetime(2026, 8, 26, 15, 21).time(), disabled=not filtrar_fecha)
     st.caption("Hora local Europe/Madrid")
 
     max_pages = st.number_input("Páginas máx (100/pág)", 1, 20, 5, help="Máximo de páginas por usuario")
