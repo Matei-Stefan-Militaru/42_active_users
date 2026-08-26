@@ -142,12 +142,15 @@ with st.sidebar:
     fetch_btn = st.button("🚀 Fetch raw", type="primary", use_container_width=True)
 
 # ── Build URL ─────────────────────────────────────────────────────────────────
-def build_url(uid, page_num, size, sort_field, sort_dir):
+def build_url(uid, page_num, size, sort_field, sort_dir, campo_fecha=None, cutoff_dt=None):
     base = f"https://api.intra.42.fr/v2/users/{uid}/correction_point_historics"
     params = [f"page[number]={page_num}", f"page[size]={size}"]
     if sort_field != "(sin ordenar)":
         prefix = "-" if sort_dir == "desc" else ""
         params.append(f"sort={prefix}{sort_field}")
+    if campo_fecha and cutoff_dt:
+        iso_cutoff = cutoff_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+        params.append(f"range[{campo_fecha}]={iso_cutoff},")
     return base + "?" + "&".join(params)
 
 # ── Fetch ─────────────────────────────────────────────────────────────────────
@@ -158,8 +161,14 @@ if fetch_btn:
 
     uid = user_id_or_login.strip()
 
+    # Calcular cutoff_dt para server-side range filter
+    cutoff_dt = None
+    if filtrar_fecha:
+        cutoff_naive = datetime.combine(cutoff_date, cutoff_time)
+        cutoff_dt = cutoff_naive.replace(tzinfo=MADRID_TZ).astimezone(timezone.utc)
+
     if not fetch_all:
-        url = build_url(uid, page_number, page_size, sort_field, sort_dir)
+        url = build_url(uid, page_number, page_size, sort_field, sort_dir, campo_fecha if filtrar_fecha else None, cutoff_dt)
         if debug:
             st.code(url)
 
@@ -193,7 +202,7 @@ if fetch_btn:
         last_headers = None
 
         while page <= max_pages:
-            url = build_url(uid, page, page_size, sort_field, sort_dir)
+            url = build_url(uid, page, page_size, sort_field, sort_dir, campo_fecha if filtrar_fecha else None, cutoff_dt)
             last_url = url
             if debug:
                 st.code(url)
@@ -273,38 +282,25 @@ with st.expander("Ver headers completos"):
 
 if raw_data is not None and isinstance(raw_data, list):
 
-    # ── Ordenar por el valor real del campo de fecha elegido ──────────────────
-    # Los registros sin fecha parseable se mandan al final, para no romper el sort.
+    # ── Ordenar por el valor real del campo de fecha elegido (client-side) ────
     raw_data_ordenado = sorted(
         raw_data,
         key=lambda d: parse_api_datetime(d.get(campo_fecha)) or datetime.min.replace(tzinfo=timezone.utc),
         reverse=invertir,
     )
 
-    # ── Filtrar por cutoff (hora local Europe/Madrid → convertida a UTC) ──────
-    cutoff_dt = None
-    if filtrar_fecha:
-        cutoff_naive = datetime.combine(cutoff_date, cutoff_time)
-        cutoff_dt = cutoff_naive.replace(tzinfo=MADRID_TZ).astimezone(timezone.utc)
-
-        raw_data_final = [
-            d for d in raw_data_ordenado
-            if (parse_api_datetime(d.get(campo_fecha)) is not None
-                and parse_api_datetime(d.get(campo_fecha)) > cutoff_dt)
-        ]
-    else:
-        raw_data_final = raw_data_ordenado
-
     orden_label = "más recientes primero" if invertir else "más antiguos primero"
-    filtro_label = f" · solo {campo_fecha} > {cutoff_date.strftime('%d/%m/%Y')} {cutoff_time.strftime('%H:%M')} (Madrid)" if filtrar_fecha else ""
+    filtro_label = f" · range[{campo_fecha}] >= {cutoff_date.strftime('%d/%m/%Y')} {cutoff_time.strftime('%H:%M')} (Madrid)" if filtrar_fecha else ""
     st.markdown(f'<div class="section-title">🧾 RAW JSON — ordenado por {campo_fecha}, {orden_label}{filtro_label}</div>', unsafe_allow_html=True)
 
     if filtrar_fecha:
-        st.caption(f"Mostrando {len(raw_data_final)} de {len(raw_data_ordenado)} registros totales (cutoff en UTC: {cutoff_dt.isoformat()})")
+        cutoff_naive = datetime.combine(cutoff_date, cutoff_time)
+        cutoff_dt_display = cutoff_naive.replace(tzinfo=MADRID_TZ).astimezone(timezone.utc)
+        st.caption(f"Filtro server-side: range[{campo_fecha}] >= {cutoff_dt_display.strftime('%Y-%m-%dT%H:%M:%SZ')} — {len(raw_data_ordenado)} registros devueltos")
 
-    st.json(raw_data_final)
+    st.json(raw_data_ordenado)
 
-    raw_json_str = json.dumps(raw_data_final, indent=2, ensure_ascii=False)
+    raw_json_str = json.dumps(raw_data_ordenado, indent=2, ensure_ascii=False)
     st.download_button(
         "⬇️ Descargar raw JSON",
         raw_json_str.encode("utf-8"),
