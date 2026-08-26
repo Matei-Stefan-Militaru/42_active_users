@@ -4,6 +4,7 @@ import time
 import pandas as pd
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
+from collections import defaultdict
 
 MADRID_TZ = ZoneInfo("Europe/Madrid")
 
@@ -14,6 +15,9 @@ POOL_REASONS = {
 ROBIN_HOOD_REASONS = {
     "Roobin Hood",
     "Robin Hood",
+}
+DEFENSE_REASONS = {
+    "Defense plannification",
 }
 
 # ── Page config ───────────────────────────────────────────────────────────────
@@ -174,6 +178,7 @@ if scan_btn:
     all_user_records = {}
     all_pool_records = []
     all_robin_records = []
+    all_defense_records = []
     processed = 0
     total_calls = 0
 
@@ -188,24 +193,31 @@ if scan_btn:
 
         user_pool = []
         user_robin = []
+        user_defense = []
         for r in records:
             reason = (r.get("reason") or "").strip()
             if reason in POOL_REASONS:
                 user_pool.append(r)
             elif reason in ROBIN_HOOD_REASONS:
                 user_robin.append(r)
+            elif reason in DEFENSE_REASONS:
+                user_defense.append(r)
 
         all_user_records[login] = {
             "Grade": u.get("Grade", ""),
             "Blackholeado": u.get("Blackholeado", False),
             "pool_records": user_pool,
             "robin_records": user_robin,
+            "defense_records": user_defense,
             "pool_sum": sum(r.get("sum", 0) for r in user_pool),
             "robin_sum": sum(r.get("sum", 0) for r in user_robin),
+            "defense_sum": sum(r.get("sum", 0) for r in user_defense),
             "total_lost": sum(r.get("sum", 0) for r in user_pool) + sum(r.get("sum", 0) for r in user_robin),
         }
         all_pool_records.extend(user_pool)
         all_robin_records.extend(user_robin)
+        for dr in user_defense:
+            all_defense_records.append({"login": login, "record": dr})
 
         bar.progress(min(processed / len(users_valid), 1.0), text=f"Historial {processed}/{len(users_valid)}")
         status.text(f"{login} — pool: {len(user_pool)} | robin: {len(user_robin)}")
@@ -216,8 +228,9 @@ if scan_btn:
     st.session_state["eval_history"] = all_user_records
     st.session_state["eval_pool_records"] = all_pool_records
     st.session_state["eval_robin_records"] = all_robin_records
+    st.session_state["eval_defense_records"] = all_defense_records
     st.session_state["eval_ts"] = datetime.now().strftime("%H:%M:%S")
-    st.success(f"✅ Listo — {len(users_valid)} usuarios · {len(all_pool_records)} pool · {len(all_robin_records)} Robin Hood")
+    st.success(f"✅ Listo — {len(users_valid)} usuarios · {len(all_pool_records)} pool · {len(all_robin_records)} Robin Hood · {len(all_defense_records)} defense plannification")
 
 # ── Guard ─────────────────────────────────────────────────────────────────────
 if "eval_history" not in st.session_state:
@@ -239,7 +252,7 @@ n_users_with_lost = sum(1 for v in history_data.values() if v["total_lost"] < 0)
 
 c1, c2, c3, c4 = st.columns(4)
 c1.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--red)">{total_lost}</div><div class="stat-lbl">PUNTOS PERDIDOS TOTALES</div></div>', unsafe_allow_html=True)
-c2.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--orange)">{total_pool_sum}</div><div class="stat-lbl">POOL (trabajo en equipo)</div></div>', unsafe_allow_html=True)
+c2.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--orange)">{total_pool_sum}</div><div class="stat-lbl">POOL (puntos donados)</div></div>', unsafe_allow_html=True)
 c3.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--purple)">{total_robin_sum}</div><div class="stat-lbl">ROBIN HOOD</div></div>', unsafe_allow_html=True)
 c4.markdown(f'<div class="stat-card"><div class="stat-val" style="color:var(--accent)">{n_users_with_lost}</div><div class="stat-lbl">USUARIOS CON PUNTOS PERDIDOS</div></div>', unsafe_allow_html=True)
 
@@ -315,3 +328,59 @@ if robin_records:
     st.download_button("⬇️ Exportar CSV (Robin Hood)", csv_robin, "eval_piscine_robin_hood.csv", "text/csv")
 else:
     st.info("No hay registros de Robin Hood.")
+
+st.markdown("---")
+
+# ── Team detection (Defense Plannification) ───────────────────────────────────
+defense_records = st.session_state.get("eval_defense_records", [])
+
+st.markdown(f'<div class="section-title">🛡️ TEAMS / DEFENSE PLANNIFICATION ({len(defense_records)} registros)</div>', unsafe_allow_html=True)
+
+if defense_records:
+    teams = defaultdict(list)
+    for entry in defense_records:
+        stid = entry["record"].get("scale_team_id")
+        if stid:
+            teams[stid].append(entry)
+
+    team_rows = []
+    for stid, members in sorted(teams.items(), key=lambda x: -abs(sum(m["record"].get("sum", 0) for m in x[1]))):
+        member_logins = sorted({m["login"] for m in members})
+        n_members = len(member_logins)
+        total_sum = sum(m["record"].get("sum", 0) for m in members)
+        n_records = len(members)
+
+        team_rows.append({
+            "Team ID": stid,
+            "Miembros": ", ".join(member_logins),
+            "N miembros": n_members,
+            "Registros": n_records,
+            "Sum total": total_sum,
+        })
+
+    df_teams = pd.DataFrame(team_rows)
+    st.dataframe(df_teams, use_container_width=True, hide_index=True)
+    csv_teams = df_teams.to_csv(index=False).encode("utf-8")
+    st.download_button("⬇️ Exportar CSV (teams)", csv_teams, "eval_piscine_teams.csv", "text/csv")
+
+    st.markdown("---")
+
+    # Per-member breakdown within each team
+    st.markdown(f'<div class="section-title">👥 DETALLE POR MIEMBRO (por team)</div>', unsafe_allow_html=True)
+    for stid, members in sorted(teams.items(), key=lambda x: -abs(sum(m["record"].get("sum", 0) for m in x[1]))):
+        member_logins = sorted({m["login"] for m in members})
+        total_sum = sum(m["record"].get("sum", 0) for m in members)
+        with st.expander(f"Team {stid} — {len(member_logins)} miembros — sum total: {total_sum}"):
+            member_rows = []
+            for login in member_logins:
+                login_records = [m["record"] for m in members if m["login"] == login]
+                login_sum = sum(r.get("sum", 0) for r in login_records)
+                member_rows.append({
+                    "Login": login,
+                    "Registros": len(login_records),
+                    "Sum": login_sum,
+                })
+            df_member = pd.DataFrame(member_rows)
+            st.dataframe(df_member, use_container_width=True, hide_index=True)
+else:
+    st.info("No hay registros de Defense plannification.")

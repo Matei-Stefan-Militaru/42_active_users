@@ -2,8 +2,6 @@ import streamlit as st
 import requests
 import time
 import pandas as pd
-import sqlite3
-import os
 from datetime import datetime, timezone
 
 _base_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
