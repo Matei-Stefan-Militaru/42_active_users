@@ -3,7 +3,7 @@
 import streamlit as st
 from api.auth import get_auth_token
 from api.campus import get_campus
-from config.settings import EXTERNAL_APPS, SEARCH_METHODS, DEFAULT_DAYS_BACK, DEFAULT_MAX_USERS
+from config.settings import EXTERNAL_APPS, SEARCH_METHODS, DEFAULT_DAYS_BACK, DEFAULT_MAX_USERS, DEFAULT_HEADERS
 
 def render_sidebar():
     """Renderizar el sidebar completo"""
@@ -46,7 +46,7 @@ def render_sidebar():
             st.error("❌ Error de autenticación")
             st.stop()
             
-        headers = {"Authorization": f"Bearer {token}"}
+        headers = {**DEFAULT_HEADERS, "Authorization": f"Bearer {token}"}
         
         # Obtener debug_mode del estado si existe
         debug_mode_for_campus = st.session_state.get('debug_mode_campus', False)

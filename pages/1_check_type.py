@@ -32,18 +32,27 @@ st.markdown('<div class="page-title">🔍 Unique States Scanner</div>', unsafe_a
 st.markdown('<div class="page-sub">Escanea la API sin filtros y saca todos los valores reales de grade / kind / active?</div>', unsafe_allow_html=True)
 
 # ── Auth (idéntico a tu app) ───────────────────────────────────────────────────
+API_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Accept": "application/json",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
 def get_token():
     try:
         cid  = st.secrets["api42"]["client_id"]
         csec = st.secrets["api42"]["client_secret"]
-        resp = requests.post("https://api.intra.42.fr/oauth/token", data={
+        resp = requests.post("https://api.intra.42.fr/oauth/token", headers=API_HEADERS, data={
             "grant_type":    "client_credentials",
             "client_id":     cid,
             "client_secret": csec,
         }, timeout=10)
         if resp.status_code == 200:
             return resp.json().get("access_token")
-        st.error(f"❌ Token error {resp.status_code}: {resp.text}")
+        if resp.status_code == 403 and "just a moment" in resp.text.lower():
+            st.error("❌ Cloudflare bloqueó la petición (403). Reintenta en unos segundos.")
+        else:
+            st.error(f"❌ Token error {resp.status_code}: {resp.text[:300]}")
     except Exception as e:
         st.error(f"Auth error: {e}")
     return None
@@ -56,7 +65,7 @@ def get_headers(force=False):
         token = get_token()
         if not token:
             return None
-        st.session_state["api_headers"] = {"Authorization": f"Bearer {token}"}
+        st.session_state["api_headers"] = {**API_HEADERS, "Authorization": f"Bearer {token}"}
         st.session_state["token_ts"]    = now
     return st.session_state["api_headers"]
 
